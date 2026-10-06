@@ -7,11 +7,12 @@ import { StatTile } from "@/components/ui/stat-tile";
 import { requirePagePermission } from "@/lib/auth";
 import { groupByPeriod, type Period } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
-import { loadRequisitionRows, loadServiceData } from "@/lib/data/reports";
+import { loadRequisitionItemRows, loadRequisitionRows, loadServiceData } from "@/lib/data/reports";
 import { getChurchSettings } from "@/lib/data/settings";
 import { addDays, formatDate, isIsoDate, startOfYear, todayInTimezone } from "@/lib/dates";
 import { formatCents, formatMoney } from "@/lib/money";
-import { summarizeRequisitions, type Bucket } from "@/lib/reports";
+import { summarizeItemPriorities, summarizeRequisitions, type Bucket } from "@/lib/reports";
+import { PriorityBadge } from "@/components/ui/priority-badge";
 import { STATUS_LABELS, isRequisitionStatus } from "@/lib/workflow/status";
 
 export const metadata = { title: "Reports" };
@@ -124,8 +125,9 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reports"
       </>
     );
   } else if (tab === "requisitions") {
-    const rows = await loadRequisitionRows(from, to);
+    const [rows, itemRows] = await Promise.all([loadRequisitionRows(from, to), loadRequisitionItemRows(from, to)]);
     const s = summarizeRequisitions(rows);
+    const byPriority = summarizeItemPriorities(itemRows);
     body = (
       <>
         <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -140,6 +142,41 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reports"
           <BucketTable title="Spending by subcategory" buckets={s.bySubcategory} currency={currency} />
           <BucketTable title="Spending by expense category" buckets={s.byExpenseCategory} currency={currency} />
           <BucketTable title="By status" buckets={s.byStatus.map((b) => ({ ...b, key: isRequisitionStatus(b.key) ? STATUS_LABELS[b.key] : b.key }))} currency={currency} />
+          <Card>
+            <CardHeader
+              title="Line items by priority"
+              description="Counts and spend per line item, by the priority the requester chose. Requisition totals above are unaffected."
+              action={<a href={`/reports/export?type=requisition-items&from=${from}&to=${to}`} className="inline-flex items-center gap-1.5 text-sm font-medium underline decoration-gold decoration-2 underline-offset-4"><Download className="size-4" aria-hidden /> Line items CSV</a>}
+            />
+            <CardBody className="px-0 sm:px-0">
+              <div className="overflow-x-auto">
+                <table className="tabular w-full min-w-[520px] text-sm">
+                  <thead className="text-left text-[12px] text-navy/55">
+                    <tr className="border-y border-navy/10">
+                      <th className="py-2 pl-5 pr-2 font-medium sm:pl-6">Priority</th>
+                      <th className="px-2 py-2 text-right font-medium">Items</th>
+                      <th className="px-2 py-2 text-right font-medium">Requisitions</th>
+                      <th className="px-2 py-2 text-right font-medium">Requested</th>
+                      <th className="px-2 py-2 text-right font-medium">Approved</th>
+                      <th className="px-2 py-2 pr-5 text-right font-medium sm:pr-6">Actual</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-navy/[0.07]">
+                    {byPriority.map((b) => (
+                      <tr key={b.priority}>
+                        <td className="py-2.5 pl-5 pr-2 sm:pl-6"><PriorityBadge priority={b.priority} size="sm" /></td>
+                        <td className="px-2 py-2.5 text-right">{b.count}</td>
+                        <td className="px-2 py-2.5 text-right">{b.requisitions}</td>
+                        <td className="px-2 py-2.5 text-right">{formatCents(b.requested, currency)}</td>
+                        <td className="px-2 py-2.5 text-right">{formatCents(b.approved, currency)}</td>
+                        <td className="px-2 py-2.5 pr-5 text-right font-medium sm:pr-6">{formatCents(b.actual, currency)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardBody>
+          </Card>
           <Card>
             <CardHeader title="Estimated vs actual (completed purchases)" description={`${s.completed.count} purchased or closed with receipts`} />
             <CardBody>

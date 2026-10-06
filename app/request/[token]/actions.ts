@@ -10,6 +10,7 @@ import { fingerprint, verifyFormStamp } from "@/lib/spam";
 import { buildRequisitionSchema, toDatabasePayload } from "@/lib/validation/requisition";
 import { notifyRequisitionSubmitted } from "@/lib/notify";
 import type { ActionResult } from "@/lib/action-result";
+import type { Priority } from "@/lib/priority";
 
 async function clientFingerprint() {
   const h = await headers();
@@ -57,7 +58,7 @@ export interface SubmissionSummary {
   request_type_name: string;
   estimated_total: string;
   status: string;
-  items: { line_number: number; description: string; quantity: string; estimated_total: string }[];
+  items: { line_number: number; description: string; quantity: string; estimated_total: string; priority: Priority; essential_justification: string | null }[];
 }
 
 export async function submitExternalRequisition(
@@ -89,7 +90,8 @@ export async function submitExternalRequisition(
     .map((f) => ({ path: String(f.path), original_filename: String(f.original_filename ?? "receipt").slice(0, 255) }));
 
   const admin = createSupabaseAdminClient();
-  const { data, error } = await admin.rpc("submit_requisition", {
+  // Validates each line's priority, then submits — one transaction (migration 20261006000100).
+  const { data, error } = await admin.rpc("submit_requisition_with_priority", {
     p_token: token,
     p_payload: toDatabasePayload(parsed.data),
     p_files: cleanFiles,
@@ -97,6 +99,7 @@ export async function submitExternalRequisition(
   });
   if (error) {
     // Messages raised by our validation functions are user-facing; others are not.
+    if (error.code !== "P0001") console.error("submit_requisition_with_priority failed", { code: error.code, message: error.message });
     return { ok: false, error: error.code === "P0001" ? error.message : GENERIC };
   }
   const result = data as SubmissionSummary & { id: string };

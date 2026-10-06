@@ -3,6 +3,7 @@ import "server-only";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { RequisitionStatus } from "@/lib/workflow/status";
 import type { WorkflowKind } from "@/lib/workflow/request-types";
+import type { Priority } from "@/lib/priority";
 
 export interface RequisitionItem {
   id: string;
@@ -28,6 +29,8 @@ export interface RequisitionItem {
   actual_total: string;
   cancelled_quantity: string;
   cancel_reason: string | null;
+  priority: Priority;
+  essential_justification: string | null;
 }
 
 export interface RequisitionDetail {

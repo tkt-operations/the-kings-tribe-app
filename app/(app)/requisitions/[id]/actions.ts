@@ -8,6 +8,7 @@ import { ActionError, friendlyDbError, toActionError, type ActionResult } from "
 import { buildPurchaseOrderPdf } from "@/lib/data/purchase-order-pdf";
 import { isIsoDate } from "@/lib/dates";
 import { parseMoney, parseQuantity } from "@/lib/money";
+import { ESSENTIAL_JUSTIFICATION_MAX, ESSENTIAL_JUSTIFICATION_MIN, PRIORITIES } from "@/lib/priority";
 import { notifyPurchaseOrderIssued, notifyReceiptReceived, notifyStatusChange } from "@/lib/notify";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isRequisitionStatus, type RequisitionStatus } from "@/lib/workflow/status";
@@ -132,6 +133,42 @@ export async function addComment(requisitionId: string, body: string) {
     refresh(requisitionId);
     return { ok: true, data: undefined, message: "Comment added successfully." };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Line-item priority (information only — never changes review or money)
+// ---------------------------------------------------------------------------
+const prioritySchema = z
+  .object({
+    priority: z.enum(PRIORITIES, { error: "Choose a priority" }),
+    essential_justification: z.string().trim().max(ESSENTIAL_JUSTIFICATION_MAX).optional().default(""),
+  })
+  .superRefine((v, issue) => {
+    if (v.priority === "essential" && v.essential_justification.length < ESSENTIAL_JUSTIFICATION_MIN) {
+      issue.addIssue({ code: "custom", path: ["essential_justification"], message: `Explain why this item is essential (at least ${ESSENTIAL_JUSTIFICATION_MIN} characters).` });
+    }
+  });
+
+export async function updateItemPriority(requisitionId: string, itemId: string, input: z.input<typeof prioritySchema>): Promise<ActionResult> {
+  try {
+    await assertPermission("requisitions.review");
+    const parsed = prioritySchema.safeParse(input);
+    if (!parsed.success) {
+      const fieldErrors: Record<string, string> = {};
+      for (const i of parsed.error.issues) fieldErrors[i.path.join(".")] ??= i.message;
+      return { ok: false, error: "Unable to update item priority. Please review the form and try again.", fieldErrors };
+    }
+    const r = await rpc<{ changed: boolean }>("set_requisition_item_priority", {
+      p_item_id: uuid.parse(itemId),
+      p_priority: parsed.data.priority,
+      p_essential_justification: parsed.data.priority === "essential" ? parsed.data.essential_justification : null,
+    });
+    refresh(requisitionId);
+    return { ok: true, data: undefined, message: r.changed ? "Item priority updated successfully." : "No changes to save." };
+  } catch (e) {
+    if (e instanceof z.ZodError) return { ok: false, error: zodMessage(e) };
+    return toActionError(e);
+  }
 }
 
 // ---------------------------------------------------------------------------

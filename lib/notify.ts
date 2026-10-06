@@ -7,6 +7,7 @@ import { formatAddress, SETTINGS_COLUMNS, type ChurchSettings } from "@/lib/data
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { renderEmail, type EmailContent } from "@/lib/email/layout";
+import { financeSubmissionSubject, priorityAlert, priorityRowFields } from "@/lib/email/requisition-priority";
 import { sendEmail, type SendResult } from "@/lib/email/send";
 import { buildReplyAddress } from "@/lib/inbound/address";
 import { getSmsProvider, toE164 } from "@/lib/sms";
@@ -36,7 +37,7 @@ interface RequisitionNotice {
   subcategory: string;
   requestType: string;
   workflow: string;
-  items: { line_number: number; description: string; quantity: string; estimated_total: string; review_status: string; approved_quantity: string | null; approved_total: string; review_comment: string | null }[];
+  items: { line_number: number; description: string; quantity: string; estimated_total: string; review_status: string; approved_quantity: string | null; approved_total: string; review_comment: string | null; priority: string; essential_justification: string | null }[];
   prefs: { email_opt_in: boolean; sms_opt_in: boolean; phone: string | null; manage_token: string } | null;
 }
 
@@ -56,7 +57,7 @@ async function loadRequisition(id: string): Promise<RequisitionNotice | null> {
       `id, requisition_number, status, requester_name, requester_email, requester_phone, submitted_at, needed_by,
        estimated_total, approved_total, actual_total, review_comment, reply_token,
        departments(name), department_subcategories(name), request_types(name, workflow),
-       requisition_items(line_number, description, quantity, estimated_total, review_status, approved_quantity, approved_total, review_comment),
+       requisition_items(line_number, description, quantity, estimated_total, review_status, approved_quantity, approved_total, review_comment, priority, essential_justification),
        notification_preferences(email_opt_in, sms_opt_in, phone, manage_token)`,
     )
     .eq("id", id)
@@ -115,10 +116,11 @@ async function log(
   });
 }
 
-function itemRows(r: RequisitionNotice, currency: string, useApproved: boolean) {
+function itemRows(r: RequisitionNotice, currency: string, useApproved: boolean, withPriority = false) {
   return r.items
     .filter((i) => !useApproved || i.review_status === "approved")
     .map((i) => ({
+      ...(withPriority ? priorityRowFields(i) : {}),
       description: i.description,
       quantity: useApproved && i.approved_quantity ? stripZeros(i.approved_quantity) : stripZeros(i.quantity),
       amount: formatMoney(useApproved ? i.approved_total : i.estimated_total, currency),
@@ -211,7 +213,7 @@ export function notifyRequisitionSubmitted(requisitionId: string): Promise<void>
       ["Date needed", formatDate(r.needed_by, "long")],
       ["Current status", STATUS_LABELS[r.status]],
     ];
-    const items = itemRows(r, currency, false);
+    const items = itemRows(r, currency, false, true);
     const total = { label: "Estimated total", amount: formatMoney(r.estimated_total, currency) };
 
     await sendToRequester(
@@ -231,10 +233,12 @@ export function notifyRequisitionSubmitted(requisitionId: string): Promise<void>
     );
 
     const recipients = await financeRecipients(admin, settings);
-    const subject = `New requisition ${r.requisition_number} — ${r.department} (${formatMoney(r.estimated_total, currency)})`;
+    const subject = financeSubmissionSubject(`New requisition ${r.requisition_number} — ${r.department} (${formatMoney(r.estimated_total, currency)})`, r.items);
+    const alert = priorityAlert(r.items);
     const rendered = renderEmail(
       {
-        preheader: `${r.requester_name} submitted a ${r.requestType} request.`,
+        preheader: alert ? `${alert.title}: ${r.requester_name} submitted a ${r.requestType} request.` : `${r.requester_name} submitted a ${r.requestType} request.`,
+        alert,
         heading: "New requisition to review",
         paragraphs: [`${r.requester_name} (${r.requester_email}) submitted a ${r.requestType} request for ${r.department}.`],
         details: [...details.slice(0, 5), ["Requester phone", r.requester_phone]],

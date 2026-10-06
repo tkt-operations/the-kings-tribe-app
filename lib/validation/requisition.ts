@@ -5,6 +5,7 @@
 import { z } from "zod";
 import { isIsoDate, addDays } from "@/lib/dates";
 import { lineTotal, parseMoney, parseQuantity, sumCents } from "@/lib/money";
+import { DEFAULT_PRIORITY, ESSENTIAL_JUSTIFICATION_MAX, ESSENTIAL_JUSTIFICATION_MIN, PRIORITIES } from "@/lib/priority";
 
 export interface RequestTypeRuleSet {
   id: string;
@@ -41,7 +42,25 @@ export const lineItemSchema = z.object({
     .optional()
     .or(z.literal("")),
   notes: optionalText(2000),
+  priority: z.enum(PRIORITIES, { error: "Choose a priority for this item" }),
+  essential_justification: z.string().trim().max(ESSENTIAL_JUSTIFICATION_MAX, `Keep this under ${ESSENTIAL_JUSTIFICATION_MAX} characters`).optional().or(z.literal("")),
+}).superRefine((item, issue) => {
+  if (item.priority === "essential" && (item.essential_justification ?? "").trim().length < ESSENTIAL_JUSTIFICATION_MIN) {
+    issue.addIssue({
+      code: "custom",
+      path: ["essential_justification"],
+      message: (item.essential_justification ?? "").trim()
+        ? `Explain why this item is essential (at least ${ESSENTIAL_JUSTIFICATION_MIN} characters)`
+        : "Explain why this item is essential",
+    });
+  }
 });
+
+/** A blank line item for the form; every new line gets its own priority. */
+export const EMPTY_LINE_ITEM = {
+  description: "", specifications: "", color: "", size: "", quantity: "1", estimated_unit_price: "",
+  vendor_name: "", vendor_url: "", notes: "", priority: DEFAULT_PRIORITY, essential_justification: "",
+} satisfies LineItemInput;
 
 export type LineItemInput = z.infer<typeof lineItemSchema>;
 
@@ -164,6 +183,8 @@ export function toDatabasePayload(v: RequisitionInput) {
       vendor_name: blank(i.vendor_name),
       vendor_url: blank(i.vendor_url),
       notes: blank(i.notes),
+      priority: i.priority,
+      essential_justification: i.priority === "essential" ? blank(i.essential_justification) : null,
     })),
   };
 }

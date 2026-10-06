@@ -1,3 +1,5 @@
+import type { Priority } from "@/lib/priority";
+
 export interface ItemModel {
   id: string;
   line: number;
@@ -15,4 +17,6 @@ export interface ItemModel {
   actualTotal: string;
   reviewComment: string | null;
   vendorName: string | null;
+  priority: Priority;
+  essentialJustification: string | null;
 }

@@ -26,8 +26,8 @@ const valid = {
   budget_explanation: "",
   justification: "Supplies for the guest welcome table on Sundays.",
   items: [
-    { description: "Coffee", quantity: "3", estimated_unit_price: "19.99", vendor_url: "" },
-    { description: "Cups", quantity: "2.5", estimated_unit_price: "10.01" },
+    { description: "Coffee", quantity: "3", estimated_unit_price: "19.99", vendor_url: "", priority: "medium" as const },
+    { description: "Cups", quantity: "2.5", estimated_unit_price: "10.01", priority: "medium" as const },
   ],
   certification_accepted: true as const,
   certification_name: "Jordan Example",
@@ -72,7 +72,7 @@ describe("requisition validation", () => {
   });
 
   it("applies Petty Cash cost center and limit rules", () => {
-    const e = errors({ ...valid, request_type_id: PETTY, items: [{ description: "Snacks", quantity: "1", estimated_unit_price: "100.01" }] });
+    const e = errors({ ...valid, request_type_id: PETTY, items: [{ description: "Snacks", quantity: "1", estimated_unit_price: "100.01", priority: "low" }] });
     expect(e).toHaveProperty("cost_center_id");
     expect(e).toHaveProperty("items");
   });

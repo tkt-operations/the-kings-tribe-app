@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Download, ExternalLink, FileText, Paperclip } from "lucide-react";
 import { Badge, StatusBadge } from "@/components/ui/badge";
+import { PriorityBadge } from "@/components/ui/priority-badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { requirePagePermission } from "@/lib/auth";
 import { listCategories } from "@/lib/data/categories";
@@ -12,6 +13,8 @@ import { formatMoney, numericToCents, formatCents, quantityToDecimal } from "@/l
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { PURCHASING_STATUSES, REVIEWABLE_STATUSES, STATUS_LABELS } from "@/lib/workflow/status";
 import { timelineFor, timelineStates } from "@/lib/workflow/request-types";
+import { countByPriority, isPriority, PRIORITY_LABELS } from "@/lib/priority";
+import { PriorityEditor } from "./priority-editor";
 import { Timeline } from "./timeline";
 import { ReviewDialog } from "./review-dialog";
 import { PurchaseOrderDialog } from "./purchase-order-dialog";
@@ -48,7 +51,19 @@ const ACTION_LABELS: Record<string, string> = {
   "receipt.rejected": "Receipt rejected",
   "requisition_item.remaining_cancelled": "Remaining quantity cancelled",
   "disbursement.recorded": "Disbursement recorded",
+  "requisition_item.priority_changed": "Item priority changed",
 };
+
+/** Extra line for audit entries whose metadata explains the change. */
+function auditDetail(action: string, metadata: Record<string, unknown>): string | null {
+  if (action === "requisition_item.priority_changed") {
+    const from = isPriority(metadata.from) ? PRIORITY_LABELS[metadata.from] : String(metadata.from ?? "—");
+    const to = isPriority(metadata.to) ? PRIORITY_LABELS[metadata.to] : String(metadata.to ?? "—");
+    if (from === to) return `Line ${metadata.line_number ?? "?"}: Essential explanation updated`;
+    return `Line ${metadata.line_number ?? "?"}${metadata.description ? ` (${metadata.description})` : ""}: ${from} → ${to}`;
+  }
+  return null;
+}
 
 function q(value: string | null | undefined) {
   if (value === null || value === undefined) return "—";
@@ -106,7 +121,12 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
     actualTotal: i.actual_total,
     reviewComment: i.review_comment,
     vendorName: i.vendor_name,
+    priority: i.priority,
+    essentialJustification: i.essential_justification,
   }));
+  const priorityCounts = countByPriority(d.items);
+  const itemById = new Map(d.items.map((i) => [i.id, i]));
+  const canEditPriority = can("requisitions.review") && d.status !== "closed";
 
   return (
     <>
@@ -168,8 +188,23 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
         <div className="min-w-0 space-y-6">
           {/* Line items */}
           <Card>
-            <CardHeader title="Line items" description={`${d.items.length} item${d.items.length === 1 ? "" : "s"} requested`} />
+            <CardHeader
+              title="Line items"
+              description={[
+                `${d.items.length} item${d.items.length === 1 ? "" : "s"} requested`,
+                ...(["essential", "high"] as const).filter((p) => priorityCounts[p]).map((p) => `${priorityCounts[p]} ${PRIORITY_LABELS[p]}`),
+              ].join(" · ")}
+            />
             <CardBody className="px-0 sm:px-0">
+              {priorityCounts.essential ? (
+                <div role="note" className="mx-5 mb-3 flex items-start gap-2 rounded-xl border-l-4 border-energy-orange bg-energy-orange/10 px-3 py-2 text-sm sm:mx-6">
+                  <PriorityBadge priority="essential" size="sm" />
+                  <span>
+                    <strong>{priorityCounts.essential === 1 ? "Essential item included." : `${priorityCounts.essential} Essential items included.`}</strong>{" "}
+                    The requester&rsquo;s reasons are shown on each line. Priority is information only. You can still approve, hold or reject any item.
+                  </span>
+                </div>
+              ) : null}
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[760px] text-sm">
                   <thead className="text-left text-[12px] text-navy/55">
@@ -194,7 +229,16 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
                         <tr key={i.id}>
                           <td className="tabular py-3 pl-5 pr-2 text-navy/50 sm:pl-6">{i.line_number}</td>
                           <td className="px-2 py-3">
+                            <div className="mb-1 flex flex-wrap items-center gap-1">
+                              <PriorityBadge priority={i.priority} size="sm" />
+                              {canEditPriority ? (
+                                <PriorityEditor requisitionId={d.id} item={{ id: i.id, line: i.line_number, description: i.description, priority: i.priority, essentialJustification: i.essential_justification }} />
+                              ) : null}
+                            </div>
                             <p className="font-medium">{i.description}</p>
+                            {i.essential_justification ? (
+                              <p className="mt-1 rounded-lg bg-energy-orange/10 px-2 py-1 text-[13px]"><span className="font-bold">Why essential:</span> {i.essential_justification}</p>
+                            ) : null}
                             <p className="text-[13px] text-navy/60">
                               {[i.specifications, i.color && `Color: ${i.color}`, i.size && `Size: ${i.size}`, i.vendor_name && `Vendor: ${i.vendor_name}`].filter(Boolean).join(" · ")}
                             </p>
@@ -275,9 +319,15 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
                         {po.void_reason ? ` · voided: ${po.void_reason}` : ""}
                       </p>
                       <ul className="mt-2 space-y-0.5 text-sm">
-                        {po.purchase_order_items.map((li) => (
-                          <li key={li.id} className="flex justify-between gap-4"><span>{li.description} × {q(li.quantity)}</span><span className="tabular">{formatMoney(li.line_total, currency)}</span></li>
-                        ))}
+                        {po.purchase_order_items.map((li) => {
+                          const item = itemById.get(li.requisition_item_id);
+                          return (
+                            <li key={li.id} className="flex justify-between gap-4">
+                              <span className="flex min-w-0 items-center gap-2">{item ? <PriorityBadge priority={item.priority} size="sm" /> : null}<span>{li.description} × {q(li.quantity)}</span></span>
+                              <span className="tabular">{formatMoney(li.line_total, currency)}</span>
+                            </li>
+                          );
+                        })}
                       </ul>
                       <div className="mt-3 flex flex-wrap gap-2">
                         {po.pdf_path ? (
@@ -316,8 +366,13 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
                       </p>
                       <ul className="mt-2 space-y-0.5 text-sm">
                         {o.vendor_order_items.map((li) => {
-                          const item = d.items.find((x) => x.id === li.requisition_item_id);
-                          return <li key={li.requisition_item_id} className="flex justify-between gap-4"><span>{item?.description} × {q(li.quantity)}</span><span className="tabular">{formatMoney(li.line_total, currency)}</span></li>;
+                          const item = itemById.get(li.requisition_item_id);
+                          return (
+                            <li key={li.requisition_item_id} className="flex justify-between gap-4">
+                              <span className="flex min-w-0 items-center gap-2">{item ? <PriorityBadge priority={item.priority} size="sm" /> : null}<span>{item?.description} × {q(li.quantity)}</span></span>
+                              <span className="tabular">{formatMoney(li.line_total, currency)}</span>
+                            </li>
+                          );
                         })}
                       </ul>
                       {o.notes ? <p className="mt-2 text-sm text-navy/70">{o.notes}</p> : null}
@@ -366,8 +421,13 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
                     {r.receipt_item_allocations.length ? (
                       <ul className="mt-2 space-y-0.5 text-sm">
                         {r.receipt_item_allocations.map((a) => {
-                          const item = d.items.find((x) => x.id === a.requisition_item_id);
-                          return <li key={a.requisition_item_id} className="flex justify-between gap-4"><span>{item?.description} × {q(a.quantity)}</span><span className="tabular">{formatMoney(a.actual_amount, currency)}</span></li>;
+                          const item = itemById.get(a.requisition_item_id);
+                          return (
+                            <li key={a.requisition_item_id} className="flex justify-between gap-4">
+                              <span className="flex min-w-0 items-center gap-2">{item ? <PriorityBadge priority={item.priority} size="sm" /> : null}<span>{item?.description} × {q(a.quantity)}</span></span>
+                              <span className="tabular">{formatMoney(a.actual_amount, currency)}</span>
+                            </li>
+                          );
                         })}
                       </ul>
                     ) : null}
@@ -531,6 +591,7 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
                   {d.audit.map((a) => (
                     <li key={a.id} className="border-b border-navy/5 pb-2 last:border-0">
                       <p className="font-medium">{ACTION_LABELS[a.action] ?? a.action}</p>
+                      {auditDetail(a.action, a.metadata ?? {}) ? <p className="text-[13px] text-navy/80">{auditDetail(a.action, a.metadata ?? {})}</p> : null}
                       <p className="text-[13px] text-navy/60">{formatDateTime(a.occurred_at, tz)} · {name(a.actor_id) ?? a.actor_label ?? "System"}</p>
                     </li>
                   ))}

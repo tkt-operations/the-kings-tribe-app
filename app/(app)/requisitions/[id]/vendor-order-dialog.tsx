@@ -5,6 +5,7 @@ import { Truck } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { PriorityBadge } from "@/components/ui/priority-badge";
 import { Checkbox, Field, FieldError, Input, RequiredNote, Select, Textarea } from "@/components/ui/field";
 import { useFieldErrors } from "@/components/ui/form-feedback";
 import { LoadingButton } from "@/components/ui/submit-button";
@@ -103,7 +104,7 @@ export function VendorOrderDialog({ requisitionId, items, currency, purchaseOrde
               <div key={e.item.id} className="grid items-start gap-2 rounded-2xl border border-navy/10 p-3 sm:grid-cols-[auto_1fr_7rem_9rem]">
                 <label className="flex items-center gap-3 sm:contents">
                   <Checkbox className="sm:mt-8" checked={lines[i].include} onChange={(ev) => setLine(i, { include: ev.target.checked })} aria-label={`Include ${e.item.description}`} />
-                  <span className="text-sm sm:pt-7"><span className="font-medium">{e.item.line}. {e.item.description}</span><span className="block text-navy/55">{showQty(e.remaining)} not yet ordered</span></span>
+                  <span className="text-sm sm:pt-7"><span className="flex flex-wrap items-center gap-1.5 font-medium"><PriorityBadge priority={e.item.priority} size="sm" />{e.item.line}. {e.item.description}</span><span className="block text-navy/55">{showQty(e.remaining)} not yet ordered</span></span>
                 </label>
                 <Field label={<>Qty ordered<span className="sr-only"> for line {e.item.line}</span></>} htmlFor={`vo_qty_${i}`} required={lines[i].include} error={fields.errors[`vo_qty_${i}`]}>
                   <Input inputMode="decimal" className="tabular" value={lines[i].quantity} disabled={!lines[i].include} onChange={(ev) => setLine(i, { quantity: ev.target.value })} />

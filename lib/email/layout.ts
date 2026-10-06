@@ -11,7 +11,18 @@ export interface EmailContent {
   heading: string;
   paragraphs: string[];          // plain text, escaped
   details?: [string, string][];  // label/value rows
-  items?: { description: string; quantity: string; amount: string; note?: string }[];
+  items?: {
+    description: string;
+    quantity: string;
+    amount: string;
+    note?: string;
+    /** Line-item priority label, e.g. "ESSENTIAL" (always shown as words, not just colour). */
+    priority?: { label: string; tone: "essential" | "high" | "medium" | "low" };
+    /** Extra emphasised line under the item, e.g. the Essential justification. */
+    priorityNote?: string;
+  }[];
+  /** Prominent notice above the message, e.g. "ESSENTIAL ITEM INCLUDED". */
+  alert?: { title: string; body: string; tone: "essential" | "high" };
   itemsTotal?: { label: string; amount: string };
   callout?: string;              // highlighted instruction (plain text)
   cta?: { label: string; url: string };
@@ -28,9 +39,23 @@ const GOLD = "#F3C94A";
 const GRAY = "#EDF0F4";
 const SERIF = "'DM Serif Display', Georgia, 'Times New Roman', serif";
 const SANS = "Satoshi, 'Helvetica Neue', Helvetica, Arial, sans-serif";
+const ORANGE = "#FD5820";
+
+// Priority pills: words + weight + colour (navy text keeps contrast on orange/gold).
+const PILL: Record<"essential" | "high" | "medium" | "low", string> = {
+  essential: `background:${ORANGE};color:${NAVY};border:1px solid ${ORANGE};`,
+  high: `background:#FCEFC4;color:${NAVY};border:1px solid ${GOLD};`,
+  medium: `background:${GRAY};color:${NAVY};border:1px solid ${GRAY};`,
+  low: `background:#ffffff;color:#5a5f70;border:1px solid #d5d9e0;`,
+};
 
 export function renderEmail(content: EmailContent, opts: { appUrl: string; churchName: string; churchLines: string[] }): RenderedEmail {
   const logo = `${opts.appUrl}/brand/logo-primary-gold-on-navy.png`;
+  const alert = content.alert
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;"><tr><td style="border-left:6px solid ${content.alert.tone === "essential" ? ORANGE : GOLD};background:${content.alert.tone === "essential" ? "#FFE9E0" : "#FDF6DE"};padding:14px 16px;">
+<p style="margin:0 0 4px;font:bold 15px/1.3 ${SANS};color:${NAVY};letter-spacing:.08em;text-transform:uppercase;">${content.alert.tone === "essential" ? "&#9888;&#65039; " : ""}${escapeHtml(content.alert.title)}</p>
+<p style="margin:0;font:14px/1.55 ${SANS};color:${NAVY};">${escapeHtml(content.alert.body)}</p></td></tr></table>`
+    : "";
   const p = content.paragraphs
     .map((t) => `<p style="margin:0 0 16px;font:16px/1.6 ${SANS};color:${NAVY};">${escapeHtml(t)}</p>`)
     .join("");
@@ -48,7 +73,7 @@ export function renderEmail(content: EmailContent, opts: { appUrl: string; churc
         ${content.items
           .map(
             (i) =>
-              `<tr><td style="padding:10px;border-bottom:1px solid ${GRAY};font:14px ${SANS};color:${NAVY};">${escapeHtml(i.description)}${i.note ? `<br><span style="color:#5a5f70;font-size:12px;">${escapeHtml(i.note)}</span>` : ""}</td><td style="padding:10px;border-bottom:1px solid ${GRAY};font:14px ${SANS};color:${NAVY};text-align:right;">${escapeHtml(i.quantity)}</td><td style="padding:10px;border-bottom:1px solid ${GRAY};font:14px ${SANS};color:${NAVY};text-align:right;">${escapeHtml(i.amount)}</td></tr>`,
+              `<tr><td style="padding:10px;border-bottom:1px solid ${GRAY};font:14px ${SANS};color:${NAVY};">${i.priority ? `<span style="display:inline-block;margin:0 0 4px;padding:2px 8px;border-radius:999px;font:bold 11px ${SANS};letter-spacing:.08em;text-transform:uppercase;${PILL[i.priority.tone]}">${escapeHtml(i.priority.label)}</span><br>` : ""}${escapeHtml(i.description)}${i.priorityNote ? `<br><span style="display:inline-block;margin-top:4px;font-size:13px;color:${NAVY};"><strong>${escapeHtml(i.priorityNote)}</strong></span>` : ""}${i.note ? `<br><span style="color:#5a5f70;font-size:12px;">${escapeHtml(i.note)}</span>` : ""}</td><td style="padding:10px;border-bottom:1px solid ${GRAY};font:14px ${SANS};color:${NAVY};text-align:right;">${escapeHtml(i.quantity)}</td><td style="padding:10px;border-bottom:1px solid ${GRAY};font:14px ${SANS};color:${NAVY};text-align:right;">${escapeHtml(i.amount)}</td></tr>`,
           )
           .join("")}
         ${content.itemsTotal ? `<tr><td colspan="2" style="padding:12px 10px;font:bold 14px ${SANS};color:${NAVY};">${escapeHtml(content.itemsTotal.label)}</td><td style="padding:12px 10px;font:bold 16px ${SANS};color:${NAVY};text-align:right;">${escapeHtml(content.itemsTotal.amount)}</td></tr>` : ""}
@@ -71,19 +96,26 @@ export function renderEmail(content: EmailContent, opts: { appUrl: string; churc
 <tr><td style="padding:32px 28px 8px;">
 <h1 style="margin:0 0 6px;font:normal 28px/1.2 ${SERIF};color:${NAVY};">${escapeHtml(content.heading)}</h1>
 <div style="width:48px;height:3px;background:${GOLD};border-radius:2px;margin:12px 0 22px;"></div>
-${p}${details}${items}${callout}${cta}
+${alert}${p}${details}${items}${callout}${cta}
 </td></tr>
 <tr><td style="padding:20px 28px 28px;border-top:1px solid ${GRAY};font:12px/1.6 ${SANS};color:#5a5f70;">
 ${content.footerNote ? `${escapeHtml(content.footerNote)}<br><br>` : ""}<strong style="color:${NAVY};">${escapeHtml(opts.churchName)}</strong><br>${opts.churchLines.map(escapeHtml).join("<br>")}
 </td></tr></table></td></tr></table></body></html>`;
 
   const text = [
+    ...(content.alert ? [`*** ${content.alert.title.toUpperCase()} ***`, content.alert.body, ""] : []),
     content.heading,
     "",
     ...content.paragraphs,
     "",
     ...(content.details ?? []).map(([k, v]) => `${k}: ${v}`),
-    ...(content.items?.length ? ["", "Items:", ...content.items.map((i) => `- ${i.description} × ${i.quantity} — ${i.amount}`)] : []),
+    ...(content.items?.length
+      ? ["", "Items:", ...content.items.flatMap((i) => [
+          `- ${i.priority ? `[${i.priority.label}] ` : ""}${i.description} × ${i.quantity} — ${i.amount}`,
+          ...(i.priorityNote ? [`  ${i.priorityNote}`] : []),
+          ...(i.note ? [`  ${i.note}`] : []),
+        ])]
+      : []),
     ...(content.itemsTotal ? [`${content.itemsTotal.label}: ${content.itemsTotal.amount}`] : []),
     ...(content.callout ? ["", content.callout] : []),
     ...(content.cta ? ["", `${content.cta.label}: ${content.cta.url}`] : []),

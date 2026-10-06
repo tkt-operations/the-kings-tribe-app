@@ -2,10 +2,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { groupByPeriod, type Period } from "@/lib/analytics";
 import { toCsv } from "@/lib/csv";
-import { loadRequisitionRows, loadServiceData } from "@/lib/data/reports";
+import { loadRequisitionItemRows, loadRequisitionRows, loadServiceData } from "@/lib/data/reports";
+import { requisitionItemsCsv, requisitionsCsv } from "@/lib/report-csv";
 import { isIsoDate } from "@/lib/dates";
-import { centsToDecimal, numericToCents } from "@/lib/money";
-import { STATUS_LABELS, isRequisitionStatus } from "@/lib/workflow/status";
+import { centsToDecimal } from "@/lib/money";
 
 const PERIODS: Period[] = ["week", "month", "quarter", "year"];
 
@@ -42,16 +42,10 @@ export async function GET(request: NextRequest) {
     }
   } else if (type === "requisitions") {
     if (!user.permissions.has("requisitions.view")) return new NextResponse("Forbidden", { status: 403 });
-    const rows = await loadRequisitionRows(from, to);
-    csv = toCsv(
-      ["Requisition #", "Submitted", "Department", "Subcategory", "Request type", "Expense category", "Status", "Estimated", "Approved", "Actual", "Variance (actual − approved)"],
-      rows.map((r) => [
-        r.requisition_number, r.submitted_at.slice(0, 10), r.department, r.subcategory, r.request_type, r.expense_category ?? "",
-        isRequisitionStatus(r.status) ? STATUS_LABELS[r.status] : r.status,
-        { number: r.estimated_total }, { number: r.approved_total }, { number: r.actual_total },
-        { number: centsToDecimal(numericToCents(r.actual_total) - numericToCents(r.approved_total)) },
-      ]),
-    );
+    csv = requisitionsCsv(await loadRequisitionRows(from, to));
+  } else if (type === "requisition-items") {
+    if (!user.permissions.has("requisitions.view")) return new NextResponse("Forbidden", { status: 403 });
+    csv = requisitionItemsCsv(await loadRequisitionItemRows(from, to));
   } else {
     return new NextResponse("Unknown report", { status: 400 });
   }

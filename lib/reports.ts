@@ -1,4 +1,5 @@
 import { numericToCents, type Cents } from "./money";
+import { PRIORITIES, PRIORITY_LABELS, type Priority } from "./priority";
 
 export interface RequisitionReportRow {
   id: string;
@@ -12,6 +13,27 @@ export interface RequisitionReportRow {
   subcategory: string;
   request_type: string;
   expense_category: string | null;
+  /** Calculated from line items. */
+  highest_item_priority?: Priority | null;
+  essential_item_count?: number;
+}
+
+/** One requisition line item (for priority reporting and the line-item CSV). */
+export interface RequisitionItemReportRow {
+  requisition_id: string;
+  requisition_number: string;
+  submitted_at: string;
+  status: string;
+  department: string;
+  line_number: number;
+  description: string;
+  priority: Priority;
+  essential_justification: string | null;
+  quantity: string;
+  estimated_total: string;
+  review_status: string;
+  approved_total: string;
+  actual_total: string;
 }
 
 export interface Bucket {
@@ -66,4 +88,24 @@ export function summarizeRequisitions(rows: RequisitionReportRow[]) {
     awaitingPurchase: rows.filter((r) => r.status === "ordered" || r.status === "po_issued"),
     completed: { count: purchasedRows.length, estimated: estimatedOfCompleted, approved: approvedOfCompleted, actual: actualOfCompleted, variance: actualOfCompleted - approvedOfCompleted },
   };
+}
+
+/**
+ * Item counts and spend by line-item priority, always Essential → Low.
+ * Sums line-item amounts only; requisition-level totals are untouched.
+ * `count` = line items; `requisitions` = requisitions containing that priority.
+ */
+export function summarizeItemPriorities(items: RequisitionItemReportRow[]): (Bucket & { priority: Priority; requisitions: number })[] {
+  return PRIORITIES.map((priority) => {
+    const rows = items.filter((i) => i.priority === priority);
+    let requested = 0n;
+    let approved = 0n;
+    let actual = 0n;
+    for (const r of rows) {
+      requested += numericToCents(r.estimated_total);
+      approved += numericToCents(r.approved_total);
+      actual += numericToCents(r.actual_total);
+    }
+    return { key: PRIORITY_LABELS[priority], priority, count: rows.length, requisitions: new Set(rows.map((r) => r.requisition_id)).size, requested, approved, actual };
+  });
 }

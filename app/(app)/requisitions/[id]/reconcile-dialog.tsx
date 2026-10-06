@@ -5,6 +5,7 @@ import { Scale } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { PriorityBadge } from "@/components/ui/priority-badge";
 import { Field, FieldError, Input, RequiredNote, Select, Textarea } from "@/components/ui/field";
 import { useFieldErrors } from "@/components/ui/form-feedback";
 import { LoadingButton } from "@/components/ui/submit-button";
@@ -105,7 +106,7 @@ export function ReconcileDialog({ requisitionId, receipt, items, purchaseOrderIt
               const poLines = purchaseOrderItems.filter((p) => p.requisitionItemId === item.id);
               return (
                 <div key={item.id} className={cn("rounded-2xl border p-3", over ? "border-energy-orange" : "border-navy/10")}>
-                  <p className="font-medium">{item.line}. {item.description}</p>
+                  <p className="flex flex-wrap items-center gap-2 font-medium"><PriorityBadge priority={item.priority} size="sm" />{item.line}. {item.description}</p>
                   <dl className="tabular mt-2 grid grid-cols-3 gap-x-3 gap-y-1 text-[13px] sm:grid-cols-6">
                     <div><dt className="text-navy/55">Ordered</dt><dd>{showQty(hundredths(item.orderedQuantity))}</dd></div>
                     <div><dt className="text-navy/55">Approved</dt><dd>{showQty(approvedQ)} · {fmt(parseMoney(item.approvedTotal) ?? 0n)}</dd></div>

@@ -17,11 +17,12 @@ import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatCents, formatMoney, lineTotal, parseMoney, parseQuantity } from "@/lib/money";
 import { checkReceiptFile, RECEIPT_ACCEPT, RECEIPT_MAX_FILES } from "@/lib/receipt-files";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { buildRequisitionSchema, estimatedTotal, type RequisitionInput } from "@/lib/validation/requisition";
+import { PriorityBadge } from "@/components/ui/priority-badge";
+import { PriorityField } from "@/components/ui/priority-field";
+import { comparePriority, countByPriority, isPriority } from "@/lib/priority";
+import { buildRequisitionSchema, EMPTY_LINE_ITEM, estimatedTotal, type RequisitionInput } from "@/lib/validation/requisition";
 import type { FormContext } from "@/lib/data/form-context";
 import { prepareReceiptUploads, submitExternalRequisition, type SubmissionSummary } from "./actions";
-
-const EMPTY_ITEM = { description: "", specifications: "", color: "", size: "", quantity: "1", estimated_unit_price: "", vendor_name: "", vendor_url: "", notes: "" };
 
 export function RequisitionForm({ token, context, stamp }: { token: string; context: FormContext; stamp: string }) {
   const [summary, setSummary] = useState<SubmissionSummary | null>(null);
@@ -63,7 +64,7 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
       actual_purchase_amount: "",
       purchase_vendor: "",
       purchase_date: "",
-      items: [{ ...EMPTY_ITEM }],
+      items: [{ ...EMPTY_LINE_ITEM }],
       certification_accepted: false as unknown as true,
       certification_name: "",
       sms_opt_in: false,
@@ -332,7 +333,10 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
             return (
               <div key={field.id} className="rounded-2xl border border-navy/12 bg-white p-4 ring-1 ring-navy/5">
                 <div className="mb-3 flex items-center justify-between">
-                  <p className="text-xs font-bold uppercase tracking-[0.12em] text-navy/55">Item {index + 1}</p>
+                  <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-navy/55">
+                    Item {index + 1}
+                    {isPriority(item?.priority) && item.priority !== "medium" ? <PriorityBadge priority={item.priority} size="sm" /> : null}
+                  </p>
                   {fields.length > 1 ? (
                     <button type="button" onClick={() => remove(index)} className="flex h-10 items-center gap-1.5 rounded-lg px-2 text-sm text-navy/70 hover:bg-navy/5">
                       <Trash2 className="size-4" aria-hidden /> Remove
@@ -368,6 +372,19 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
                   <Field className="sm:col-span-3" label="Vendor website / product link" htmlFor={`items.${index}.vendor_url`} error={e?.vendor_url?.message}>
                     <Input id={`items.${index}.vendor_url`} type="url" inputMode="url" autoCapitalize="none" placeholder="https://" {...register(`items.${index}.vendor_url`)} aria-invalid={!!e?.vendor_url} />
                   </Field>
+                  <PriorityField
+                    className="sm:col-span-6"
+                    id={`items.${index}.priority`}
+                    value={isPriority(item?.priority) ? item.priority : undefined}
+                    error={e?.priority?.message}
+                    inputProps={(p) => ({ ...register(`items.${index}.priority`), value: p })}
+                  />
+                  {item?.priority === "essential" ? (
+                    <Field className="sm:col-span-6" label="Why is this item essential?" htmlFor={`items.${index}.essential_justification`} required
+                      error={e?.essential_justification?.message} hint="Briefly explain the operational impact if this item is not purchased.">
+                      <Textarea id={`items.${index}.essential_justification`} rows={2} maxLength={500} {...register(`items.${index}.essential_justification`)} />
+                    </Field>
+                  ) : null}
                   <Field className="sm:col-span-6" label="Notes (optional)" htmlFor={`items.${index}.notes`}>
                     <Input id={`items.${index}.notes`} {...register(`items.${index}.notes`)} />
                   </Field>
@@ -375,7 +392,7 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
               </div>
             );
           })}
-          <Button type="button" variant="gold" size="lg" className="w-full" onClick={() => append({ ...EMPTY_ITEM })} disabled={fields.length >= 50}>
+          <Button type="button" variant="gold" size="lg" className="w-full" onClick={() => append({ ...EMPTY_LINE_ITEM })} disabled={fields.length >= 50}>
             <Plus className="size-5" aria-hidden /> Add Item
           </Button>
           <FieldError message={errors.items?.message ?? errors.items?.root?.message} live />
@@ -472,9 +489,20 @@ function Confirmation({ summary, currency, onAnother }: { summary: SubmissionSum
             <div key={k} className="flex justify-between gap-4 py-2.5"><dt className="text-navy/60">{k}</dt><dd className="text-right font-medium">{v}</dd></div>
           ))}
         </dl>
-        <ul className="mx-auto mt-6 max-w-md space-y-1 text-left text-sm text-navy/70">
-          {summary.items.map((i) => (
-            <li key={i.line_number} className="flex justify-between gap-4"><span className="truncate">{i.description} × {i.quantity.replace(/\.00$/, "")}</span><span className="tabular">{formatMoney(i.estimated_total, currency)}</span></li>
+        {countByPriority(summary.items).essential > 0 ? (
+          <p className="mx-auto mt-6 max-w-md rounded-xl bg-energy-orange/10 px-3 py-2 text-left text-sm font-medium">
+            This request includes {countByPriority(summary.items).essential} Essential item{countByPriority(summary.items).essential === 1 ? "" : "s"}. Finance will see your explanation.
+          </p>
+        ) : null}
+        <ul className="mx-auto mt-4 max-w-md space-y-2 text-left text-sm text-navy/70">
+          {[...summary.items].sort((a, b) => comparePriority(a.priority, b.priority) || a.line_number - b.line_number).map((i) => (
+            <li key={i.line_number} className="flex items-start justify-between gap-4">
+              <span className="flex min-w-0 items-center gap-2">
+                {isPriority(i.priority) ? <PriorityBadge priority={i.priority} size="sm" /> : null}
+                <span className="truncate">{i.description} × {i.quantity.replace(/\.00$/, "")}</span>
+              </span>
+              <span className="tabular">{formatMoney(i.estimated_total, currency)}</span>
+            </li>
           ))}
         </ul>
         <Button variant="secondary" className="mt-8" onClick={onAnother}>Submit another request</Button>
