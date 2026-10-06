@@ -8,7 +8,6 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         className="brand-pattern relative flex flex-col justify-between bg-navy px-8 pb-10 text-white lg:px-14"
         style={{ paddingTop: "calc(var(--safe-top) + 2.5rem)" }}
       >
-        <div className="absolute inset-0 bg-navy/[0.93]" aria-hidden />
         <div className="relative">
           <Logo variant="primary-gold-on-navy" height={112} />
         </div>

@@ -78,9 +78,10 @@ body {
 
 /* The official pattern, used only as a quiet texture on navy surfaces */
 .brand-pattern {
-  background-image: url("/brand/pattern-white.svg");
-  background-size: 640px auto;
-  background-repeat: repeat;
+  background-color: var(--color-navy);
+  background-image: linear-gradient(rgba(18, 23, 45, 0.94), rgba(18, 23, 45, 0.94)), url("/brand/pattern-white.svg");
+  background-size: auto, 640px auto;
+  background-repeat: no-repeat, repeat;
 }
 
 /* Inputs: iOS zooms on focus below 16px — keep form text at 16px+ */

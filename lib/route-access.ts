@@ -8,6 +8,8 @@ const PUBLIC_PREFIXES = [
   "/setup",
   "/api/inbound-email",
   "/offline",
+  // Development-only design previews (pages return 404 in production).
+  "/dev-preview",
 ];
 
 export function isPublicPath(pathname: string): boolean {

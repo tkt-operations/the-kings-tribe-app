@@ -161,16 +161,18 @@ export function SundayEntryForm(props: {
                     {row.name}
                     {row.archived ? <span className="ml-2 text-xs text-navy/50">(archived)</span> : null}
                   </label>
+                  <div className="w-32 shrink-0">
                   <Input
                     id={`att-${row.categoryId}`}
                     inputMode="numeric"
                     pattern="[0-9]*"
                     autoComplete="off"
                     placeholder="0"
-                    className="tabular w-32 text-right text-lg"
+                    className="tabular text-right text-lg"
                     {...register(`attendance.${i}.count`, { pattern: { value: /^\d{0,7}$/, message: "Whole numbers only" } })}
                     aria-invalid={Boolean(formState.errors.attendance?.[i]?.count)}
                   />
+                  </div>
                 </div>
               ))}
               <div className="mt-2 flex items-center justify-between rounded-2xl bg-navy px-4 py-3 text-white">
@@ -210,7 +212,7 @@ export function SundayEntryForm(props: {
                       >
                         <MessageSquarePlus className="size-5" aria-hidden />
                       </button>
-                      <div className="relative w-40">
+                      <div className="relative w-36 shrink-0 sm:w-40">
                         <span className="pointer-events-none absolute left-3.5 top-3 text-lg text-navy/40" aria-hidden>$</span>
                         <Input
                           id={`fin-${row.key}`}

@@ -62,7 +62,6 @@ function Shell({ children, header }: { children: React.ReactNode; header?: React
   return (
     <div className="min-h-dvh bg-neutral-gray">
       <header className="brand-pattern relative bg-navy" style={{ paddingTop: "calc(var(--safe-top) + 1.75rem)" }}>
-        <div className="absolute inset-0 bg-navy/[0.93]" aria-hidden />
         <div className="relative mx-auto max-w-3xl px-5 pb-24 sm:px-8">
           <Logo variant="landscape-gold-on-navy" height={44} />
           {header}

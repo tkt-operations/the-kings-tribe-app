@@ -142,7 +142,9 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
         <input id="website" name="website" type="text" tabIndex={-1} autoComplete="off" />
       </div>
 
-      <Alert tone="warning" title="Requisition policy">{context.policy}</Alert>
+      <div className="rounded-[var(--radius-card)] bg-white p-1.5 shadow-sm shadow-navy/5">
+        <Alert tone="warning" title="Requisition policy" className="border-0">{context.policy}</Alert>
+      </div>
 
       <Section number={1} title="About you">
         <div className="grid gap-4 sm:grid-cols-2">
@@ -407,7 +409,7 @@ function Section({ number, title, children }: { number: number; title: string; c
     <Card>
       <CardBody className="pt-5 sm:pt-6">
         <h2 className="mb-5 flex items-center gap-3 font-serif text-2xl">
-          <span className="flex size-8 items-center justify-center rounded-full bg-gold font-sans text-sm font-bold text-navy">{number}</span>
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-gold font-sans text-sm font-bold text-navy">{number}</span>
           {title}
         </h2>
         {children}
