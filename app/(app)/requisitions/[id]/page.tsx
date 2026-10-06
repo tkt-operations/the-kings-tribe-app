@@ -15,6 +15,7 @@ import { PURCHASING_STATUSES, REVIEWABLE_STATUSES, STATUS_LABELS } from "@/lib/w
 import { timelineFor, timelineStates } from "@/lib/workflow/request-types";
 import { countByPriority, isPriority, PRIORITY_LABELS } from "@/lib/priority";
 import { PriorityEditor } from "./priority-editor";
+import { toItemModel } from "./item-model";
 import { Timeline } from "./timeline";
 import { ReviewDialog } from "./review-dialog";
 import { PurchaseOrderDialog } from "./purchase-order-dialog";
@@ -104,26 +105,7 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
   const pendingReceipts = d.receipts.filter((r) => r.status === "pending");
   const variance = numericToCents(d.actual_total) - numericToCents(d.approved_total);
 
-  const itemModels = d.items.map((i) => ({
-    id: i.id,
-    line: i.line_number,
-    description: i.description,
-    quantity: i.quantity,
-    estimatedUnitPrice: i.estimated_unit_price,
-    reviewStatus: i.review_status,
-    approvedQuantity: i.approved_quantity,
-    approvedUnitPrice: i.approved_unit_price,
-    approvedTotal: i.approved_total,
-    poQuantity: i.po_quantity,
-    orderedQuantity: i.ordered_quantity,
-    purchasedQuantity: i.purchased_quantity,
-    cancelledQuantity: i.cancelled_quantity,
-    actualTotal: i.actual_total,
-    reviewComment: i.review_comment,
-    vendorName: i.vendor_name,
-    priority: i.priority,
-    essentialJustification: i.essential_justification,
-  }));
+  const itemModels = d.items.map(toItemModel);
   const priorityCounts = countByPriority(d.items);
   const itemById = new Map(d.items.map((i) => [i.id, i]));
   const canEditPriority = can("requisitions.review") && d.status !== "closed";

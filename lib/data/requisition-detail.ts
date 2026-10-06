@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { withDecimals } from "@/lib/data/decimal";
 import type { RequisitionStatus } from "@/lib/workflow/status";
 import type { WorkflowKind } from "@/lib/workflow/request-types";
 import type { Priority } from "@/lib/priority";
@@ -134,6 +135,41 @@ export interface RequisitionDetail {
   people: Map<string, string>;
 }
 
+// Numeric columns (PostgREST returns these as JSON numbers) → decimal strings.
+const REQUISITION_DECIMALS = ["estimated_total", "approved_total", "actual_total", "disbursed_total"] as const;
+const ITEM_DECIMALS = ["quantity", "estimated_unit_price", "estimated_total", "approved_total", "po_quantity", "ordered_quantity", "purchased_quantity", "actual_total", "cancelled_quantity"] as const;
+const ITEM_OPTIONAL_DECIMALS = ["approved_quantity", "approved_unit_price"] as const;
+const LINE_DECIMALS = ["quantity", "unit_price", "line_total"] as const;
+
+type Row = Record<string, unknown>;
+const rows = (v: unknown): Row[] => (Array.isArray(v) ? (v as Row[]) : []);
+
+/**
+ * Normalise every quantity/amount in the raw query results to the app's
+ * canonical decimal-string shape. Pure — exported for tests.
+ */
+export function normalizeDetailRows(raw: {
+  requisition: Row; items: unknown; purchaseOrders: unknown; vendorOrders: unknown; receipts: unknown; disbursements: unknown;
+}) {
+  return {
+    requisition: withDecimals(raw.requisition, REQUISITION_DECIMALS, ["actual_purchase_amount"]),
+    items: rows(raw.items).map((i) => withDecimals(i, ITEM_DECIMALS, ITEM_OPTIONAL_DECIMALS)),
+    purchaseOrders: rows(raw.purchaseOrders).map((po): Row => ({
+      ...withDecimals(po, ["total"]),
+      purchase_order_items: rows(po.purchase_order_items).map((li) => withDecimals(li, LINE_DECIMALS)),
+    })),
+    vendorOrders: rows(raw.vendorOrders).map((o): Row => ({
+      ...withDecimals(o, ["total"]),
+      vendor_order_items: rows(o.vendor_order_items).map((li) => withDecimals(li, LINE_DECIMALS)),
+    })),
+    receipts: rows(raw.receipts).map((r): Row => ({
+      ...withDecimals(r, [], ["total_amount"]),
+      receipt_item_allocations: rows(r.receipt_item_allocations).map((a) => withDecimals(a, ["quantity", "actual_amount"])),
+    })),
+    disbursements: rows(raw.disbursements).map((x) => withDecimals(x, ["amount"])),
+  };
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function loadRequisitionDetail(id: string): Promise<RequisitionDetail | null> {
@@ -167,7 +203,10 @@ export async function loadRequisitionDetail(id: string): Promise<RequisitionDeta
     supabase.from("profiles").select("id, full_name, email"),
   ]);
 
-  const r = req as Record<string, unknown> & {
+  const n = normalizeDetailRows({
+    requisition: req as Row, items: items.data, purchaseOrders: pos.data, vendorOrders: orders.data, receipts: receipts.data, disbursements: disbursements.data,
+  });
+  const r = n.requisition as Record<string, unknown> & {
     departments: RequisitionDetail["department"];
     department_subcategories: RequisitionDetail["subcategory"];
     request_types: RequisitionDetail["requestType"];
@@ -181,16 +220,16 @@ export async function loadRequisitionDetail(id: string): Promise<RequisitionDeta
     requestType: r.request_types,
     costCenter: r.cost_centers,
     expenseCategory: r.categories,
-    items: (items.data ?? []) as RequisitionItem[],
+    items: n.items as unknown as RequisitionItem[],
     history: (history.data ?? []) as RequisitionDetail["history"],
     comments: (comments.data ?? []) as RequisitionDetail["comments"],
-    purchaseOrders: ((pos.data ?? []) as RequisitionDetail["purchaseOrders"]).map((po) => ({
+    purchaseOrders: (n.purchaseOrders as unknown as RequisitionDetail["purchaseOrders"]).map((po) => ({
       ...po,
       purchase_order_items: [...po.purchase_order_items].sort((a, b) => a.line_number - b.line_number),
     })),
-    vendorOrders: (orders.data ?? []) as RequisitionDetail["vendorOrders"],
-    receipts: (receipts.data ?? []) as RequisitionDetail["receipts"],
-    disbursements: (disbursements.data ?? []) as RequisitionDetail["disbursements"],
+    vendorOrders: n.vendorOrders as unknown as RequisitionDetail["vendorOrders"],
+    receipts: n.receipts as unknown as RequisitionDetail["receipts"],
+    disbursements: n.disbursements as unknown as RequisitionDetail["disbursements"],
     audit: (audit.data ?? []) as RequisitionDetail["audit"],
     notifications: (notifications.data ?? []) as RequisitionDetail["notifications"],
     people: new Map(((people.data ?? []) as { id: string; full_name: string; email: string }[]).map((p) => [p.id, p.full_name || p.email])),
