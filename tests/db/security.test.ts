@@ -217,3 +217,20 @@ describe("privilege escalation guards", () => {
     });
   });
 });
+
+describe("requisition link secrets", () => {
+  it("only form_links.manage can read link rows, and only hashes are stored", async () => {
+    const { createTestDatabase, createUser, as } = await import("./harness");
+    const { createFormToken, FORM_TOKEN } = await import("./fixtures");
+    const db = await createTestDatabase();
+    const viewer = await createUser(db, "viewer2@example.org", ["viewer"]);
+    const admin = await createUser(db, "admin2@example.org", ["administrator"]);
+    await createFormToken(db);
+    const seenByViewer = await as(db, "authenticated", viewer, () => db.query("select * from public.external_form_tokens"));
+    expect(seenByViewer.rows).toHaveLength(0);
+    await expect(as(db, "anon", null, () => db.query("select * from public.external_form_tokens"))).rejects.toThrow(/permission denied/);
+    const seenByAdmin = await as(db, "authenticated", admin, () => db.query<Record<string, unknown>>("select * from public.external_form_tokens"));
+    expect(seenByAdmin.rows).toHaveLength(1);
+    expect(JSON.stringify(seenByAdmin.rows[0])).not.toContain(FORM_TOKEN);
+  });
+});
