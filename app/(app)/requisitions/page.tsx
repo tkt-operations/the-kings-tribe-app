@@ -1,42 +1,23 @@
 import Link from "next/link";
 import { Search } from "lucide-react";
-import { StatusBadge } from "@/components/ui/badge";
-import { PriorityIndicator } from "@/components/ui/priority-badge";
 import { ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input, Select } from "@/components/ui/field";
 import { PageHeader } from "@/components/ui/page-header";
+import { RequisitionCards, RequisitionTable, type RequisitionListRow } from "./requisition-list";
 import { requirePagePermission } from "@/lib/auth";
 import { getChurchSettings } from "@/lib/data/settings";
-import { addDays, formatDate, isIsoDate } from "@/lib/dates";
-import { formatMoney } from "@/lib/money";
-import { isPriority, PRIORITIES, PRIORITY_LABELS, type Priority } from "@/lib/priority";
+import { addDays, isIsoDate } from "@/lib/dates";
+import { isPriority, PRIORITIES, PRIORITY_LABELS } from "@/lib/priority";
 import { sanitizeSearch } from "@/lib/search";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { REQUISITION_STATUSES, STATUS_LABELS, isRequisitionStatus, type RequisitionStatus } from "@/lib/workflow/status";
+import { REQUISITION_STATUSES, STATUS_LABELS, isRequisitionStatus } from "@/lib/workflow/status";
 
 export const metadata = { title: "Requisitions" };
 
 const PAGE_SIZE = 50;
 
-type Row = {
-  id: string;
-  requisition_number: string;
-  submitted_at: string;
-  requester_name: string;
-  requester_email: string;
-  needed_by: string;
-  estimated_total: string;
-  status: RequisitionStatus;
-  is_demo: boolean;
-  assigned_reviewer_id: string | null;
-  departments: { name: string } | null;
-  department_subcategories: { name: string } | null;
-  request_types: { name: string } | null;
-  // Calculated from line items in the database (never stored on the requisition)
-  highest_item_priority: Priority | null;
-  essential_item_count: number;
-};
+type Row = RequisitionListRow & { requester_email: string };
 
 const SORTS = { newest: "Newest first", priority: "Priority (Essential first)" } as const;
 
@@ -146,62 +127,8 @@ export default async function RequisitionsPage({ searchParams }: PageProps<"/req
         <EmptyState title="No requisitions found">Try different filters, or share a requisition link with a department lead.</EmptyState>
       ) : (
         <>
-          {/* Mobile cards */}
-          <ul className="space-y-3 lg:hidden">
-            {rows.map((r) => (
-              <li key={r.id}>
-                <Link href={`/requisitions/${r.id}`} className="block rounded-[var(--radius-card)] bg-white p-4 ring-1 ring-navy/10 active:bg-navy/[0.02]">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="tabular font-bold">{r.requisition_number}{r.is_demo ? <span className="ml-2 text-xs font-medium text-navy/50">DEMO</span> : null}</p>
-                      <p className="truncate text-sm text-navy/65">{r.requester_name} · {r.departments?.name}</p>
-                    </div>
-                    <StatusBadge status={r.status} />
-                  </div>
-                  {r.highest_item_priority && r.highest_item_priority !== "medium" && r.highest_item_priority !== "low" ? (
-                    <PriorityIndicator className="mt-2" highest={r.highest_item_priority} essentialCount={r.essential_item_count} />
-                  ) : null}
-                  <div className="mt-3 flex items-end justify-between text-sm">
-                    <span className="text-navy/60">{r.request_types?.name} · needed {formatDate(r.needed_by, "short")}</span>
-                    <span className="tabular text-base font-bold">{formatMoney(r.estimated_total, currency)}</span>
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
-
-          {/* Desktop table */}
-          <div className="hidden overflow-hidden rounded-[var(--radius-card)] bg-white ring-1 ring-navy/10 lg:block">
-            <table className="w-full text-sm">
-              <thead className="bg-neutral-gray/60 text-left text-[13px] text-navy/60">
-                <tr>
-                  {["Requisition #", "Date", "Requester", "Department", "Subcategory", "Request type", "Needed", "Est. total", "Status", "Priority", "Reviewer"].map((h, i) => (
-                    <th key={h} scope="col" className={`px-4 py-3 font-medium ${i === 7 ? "text-right" : ""}`}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-navy/[0.07]">
-                {rows.map((r) => (
-                  <tr key={r.id} className="hover:bg-navy/[0.02]">
-                    <td className="px-4 py-3">
-                      <Link href={`/requisitions/${r.id}`} className="tabular font-bold underline-offset-4 hover:underline">{r.requisition_number}</Link>
-                      {r.is_demo ? <span className="ml-1.5 text-[11px] font-medium text-navy/45">DEMO</span> : null}
-                    </td>
-                    <td className="tabular px-4 py-3 text-navy/70">{formatDate(r.submitted_at.slice(0, 10), "short")}</td>
-                    <td className="px-4 py-3">{r.requester_name}</td>
-                    <td className="px-4 py-3">{r.departments?.name}</td>
-                    <td className="px-4 py-3 text-navy/70">{r.department_subcategories?.name}</td>
-                    <td className="px-4 py-3 text-navy/70">{r.request_types?.name}</td>
-                    <td className="tabular px-4 py-3 text-navy/70">{formatDate(r.needed_by, "short")}</td>
-                    <td className="tabular px-4 py-3 text-right font-medium">{formatMoney(r.estimated_total, currency)}</td>
-                    <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
-                    <td className="px-4 py-3"><PriorityIndicator highest={r.highest_item_priority} essentialCount={r.essential_item_count} /></td>
-                    <td className="px-4 py-3 text-navy/70">{r.assigned_reviewer_id ? names.get(r.assigned_reviewer_id) ?? "—" : "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <RequisitionCards rows={rows} currency={currency} />
+          <RequisitionTable rows={rows} currency={currency} reviewerName={(id) => (id ? names.get(id) ?? "—" : "—")} />
 
           <nav className="mt-6 flex items-center justify-between text-sm" aria-label="Pagination">
             <span className="text-navy/60">{count} requisition{count === 1 ? "" : "s"}</span>

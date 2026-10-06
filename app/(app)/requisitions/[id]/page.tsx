@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Download, ExternalLink, FileText, Paperclip } from "lucide-react";
+import { ArrowLeft, Download, FileText, Paperclip } from "lucide-react";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { PriorityBadge } from "@/components/ui/priority-badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -16,6 +16,7 @@ import { timelineFor, timelineStates } from "@/lib/workflow/request-types";
 import { countByPriority, isPriority, PRIORITY_LABELS } from "@/lib/priority";
 import { PriorityEditor } from "./priority-editor";
 import { toItemModel } from "./item-model";
+import { LineItemsTable } from "./line-items-table";
 import { Timeline } from "./timeline";
 import { ReviewDialog } from "./review-dialog";
 import { PurchaseOrderDialog } from "./purchase-order-dialog";
@@ -166,108 +167,39 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
         </CardBody>
       </Card>
 
+      {/* Line items — full width so the purchasing lifecycle columns fit beside the sidebar */}
+      <Card className="mb-6">
+        <CardHeader
+          title="Line items"
+          description={[
+            `${d.items.length} item${d.items.length === 1 ? "" : "s"} requested`,
+            ...(["essential", "high"] as const).filter((p) => priorityCounts[p]).map((p) => `${priorityCounts[p]} ${PRIORITY_LABELS[p]}`),
+          ].join(" · ")}
+        />
+        <CardBody className="px-0 sm:px-0">
+          {priorityCounts.essential ? (
+            <div role="note" className="mx-5 mb-3 flex items-start gap-2 rounded-xl border-l-4 border-energy-orange bg-energy-orange/10 px-3 py-2 text-sm sm:mx-6">
+              <PriorityBadge priority="essential" size="sm" />
+              <span>
+                <strong>{priorityCounts.essential === 1 ? "Essential item included." : `${priorityCounts.essential} Essential items included.`}</strong>{" "}
+                The requester&rsquo;s reasons are shown on each line. Priority is information only. You can still approve, hold or reject any item.
+              </span>
+            </div>
+          ) : null}
+          <LineItemsTable
+            items={d.items}
+            currency={currency}
+            renderPriorityEditor={canEditPriority ? (i) => (
+              <PriorityEditor requisitionId={d.id} item={{ id: i.id, line: i.line_number, description: i.description, priority: i.priority, essentialJustification: i.essential_justification }} />
+            ) : undefined}
+            renderRemaining={can("receipts.reconcile") && purchasing ? (i, remaining) => (
+              <CancelRemainingButton requisitionId={d.id} itemId={i.id} max={quantityToDecimal(remaining)} />
+            ) : undefined}
+          />
+        </CardBody>
+      </Card>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="min-w-0 space-y-6">
-          {/* Line items */}
-          <Card>
-            <CardHeader
-              title="Line items"
-              description={[
-                `${d.items.length} item${d.items.length === 1 ? "" : "s"} requested`,
-                ...(["essential", "high"] as const).filter((p) => priorityCounts[p]).map((p) => `${priorityCounts[p]} ${PRIORITY_LABELS[p]}`),
-              ].join(" · ")}
-            />
-            <CardBody className="px-0 sm:px-0">
-              {priorityCounts.essential ? (
-                <div role="note" className="mx-5 mb-3 flex items-start gap-2 rounded-xl border-l-4 border-energy-orange bg-energy-orange/10 px-3 py-2 text-sm sm:mx-6">
-                  <PriorityBadge priority="essential" size="sm" />
-                  <span>
-                    <strong>{priorityCounts.essential === 1 ? "Essential item included." : `${priorityCounts.essential} Essential items included.`}</strong>{" "}
-                    The requester&rsquo;s reasons are shown on each line. Priority is information only. You can still approve, hold or reject any item.
-                  </span>
-                </div>
-              ) : null}
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-sm">
-                  <thead className="text-left text-[12px] text-navy/55">
-                    <tr className="border-y border-navy/10">
-                      <th className="py-2 pl-5 pr-2 font-medium sm:pl-6">#</th>
-                      <th className="px-2 py-2 font-medium">Item</th>
-                      <th className="px-2 py-2 text-right font-medium">Requested</th>
-                      <th className="px-2 py-2 font-medium">Decision</th>
-                      <th className="px-2 py-2 text-right font-medium">Approved</th>
-                      <th className="px-2 py-2 text-right font-medium">On PO</th>
-                      <th className="px-2 py-2 text-right font-medium">Ordered</th>
-                      <th className="px-2 py-2 text-right font-medium">Purchased</th>
-                      <th className="px-2 py-2 pr-5 text-right font-medium sm:pr-6">Actual</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-navy/[0.07] align-top">
-                    {d.items.map((i) => {
-                      const remaining = i.review_status === "approved"
-                        ? numericToCents(i.approved_quantity) - numericToCents(i.purchased_quantity) - numericToCents(i.cancelled_quantity)
-                        : 0n;
-                      return (
-                        <tr key={i.id}>
-                          <td className="tabular py-3 pl-5 pr-2 text-navy/50 sm:pl-6">{i.line_number}</td>
-                          <td className="px-2 py-3">
-                            <div className="mb-1 flex flex-wrap items-center gap-1">
-                              <PriorityBadge priority={i.priority} size="sm" />
-                              {canEditPriority ? (
-                                <PriorityEditor requisitionId={d.id} item={{ id: i.id, line: i.line_number, description: i.description, priority: i.priority, essentialJustification: i.essential_justification }} />
-                              ) : null}
-                            </div>
-                            <p className="font-medium">{i.description}</p>
-                            {i.essential_justification ? (
-                              <p className="mt-1 rounded-lg bg-energy-orange/10 px-2 py-1 text-[13px]"><span className="font-bold">Why essential:</span> {i.essential_justification}</p>
-                            ) : null}
-                            <p className="text-[13px] text-navy/60">
-                              {[i.specifications, i.color && `Color: ${i.color}`, i.size && `Size: ${i.size}`, i.vendor_name && `Vendor: ${i.vendor_name}`].filter(Boolean).join(" · ")}
-                            </p>
-                            {i.vendor_url ? (
-                              <a href={i.vendor_url} target="_blank" rel="noopener noreferrer nofollow" className="mt-0.5 inline-flex items-center gap-1 text-[13px] text-ministry-blue underline-offset-2 hover:underline">
-                                Product link <ExternalLink className="size-3" aria-hidden />
-                              </a>
-                            ) : null}
-                            {i.notes ? <p className="mt-1 text-[13px] text-navy/60">Note: {i.notes}</p> : null}
-                            {i.review_comment ? <p className="mt-1 text-[13px] font-medium">Finance: {i.review_comment}</p> : null}
-                            {Number(i.cancelled_quantity) > 0 ? <p className="mt-1 text-[13px] text-navy/60">{q(i.cancelled_quantity)} not purchased — {i.cancel_reason}</p> : null}
-                          </td>
-                          <td className="tabular px-2 py-3 text-right">
-                            {q(i.quantity)} × {formatMoney(i.estimated_unit_price, currency)}
-                            <span className="block font-medium">{formatMoney(i.estimated_total, currency)}</span>
-                          </td>
-                          <td className="px-2 py-3">
-                            <Badge tone={i.review_status === "approved" ? "positive" : i.review_status === "rejected" ? "negative" : i.review_status === "held" ? "attention" : "neutral"}>
-                              {i.review_status === "pending" ? "Pending" : i.review_status.charAt(0).toUpperCase() + i.review_status.slice(1)}
-                            </Badge>
-                          </td>
-                          <td className="tabular px-2 py-3 text-right">
-                            {i.review_status === "approved" ? (
-                              <>
-                                {q(i.approved_quantity)} × {formatMoney(i.approved_unit_price, currency)}
-                                <span className="block font-medium">{formatMoney(i.approved_total, currency)}</span>
-                              </>
-                            ) : "—"}
-                          </td>
-                          <td className="tabular px-2 py-3 text-right">{i.review_status === "approved" ? q(i.po_quantity) : "—"}</td>
-                          <td className="tabular px-2 py-3 text-right">{i.review_status === "approved" ? q(i.ordered_quantity) : "—"}</td>
-                          <td className="tabular px-2 py-3 text-right">
-                            {i.review_status === "approved" ? q(i.purchased_quantity) : "—"}
-                            {remaining > 0n ? <span className="block text-[12px] text-navy/55">{quantityToDecimal(remaining)} remaining</span> : null}
-                            {remaining > 0n && can("receipts.reconcile") && purchasing ? (
-                              <CancelRemainingButton requisitionId={d.id} itemId={i.id} max={quantityToDecimal(remaining)} />
-                            ) : null}
-                          </td>
-                          <td className="tabular px-2 py-3 pr-5 text-right font-medium sm:pr-6">{i.review_status === "approved" ? formatMoney(i.actual_total, currency) : "—"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </CardBody>
-          </Card>
 
           {/* Justification */}
           <Card>

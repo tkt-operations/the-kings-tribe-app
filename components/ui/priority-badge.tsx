@@ -46,19 +46,20 @@ export function PriorityBadge({ priority, className, size = "md" }: { priority: 
 /** Requisition-level summary computed from its items, e.g. on list rows. */
 export function PriorityIndicator({ highest, essentialCount, className }: { highest: Priority | null; essentialCount: number; className?: string }) {
   if (!highest) return null;
+  // Wraps (badge first, supporting text below) instead of forcing its cell wider.
   if (highest === "essential") {
     return (
-      <span className={cn("inline-flex items-center gap-1.5", className)}>
+      <span className={cn("flex flex-wrap items-center gap-x-1.5 gap-y-1", className)}>
         <PriorityBadge priority="essential" size="sm" />
-        <span className="text-[12px] font-bold text-navy">
+        <span className="text-[12px] font-bold leading-tight text-navy">
           {essentialCount > 1 ? `${essentialCount} Essential items` : "Contains Essential item"}
         </span>
       </span>
     );
   }
   return (
-    <span className={cn("inline-flex items-center gap-1.5", className)}>
-      <span className="text-[12px] text-navy/60">Highest priority</span>
+    <span className={cn("flex flex-wrap items-center gap-x-1.5 gap-y-1", className)}>
+      <span className="text-[12px] leading-tight text-navy/60">Highest priority</span>
       <PriorityBadge priority={highest} size="sm" />
     </span>
   );

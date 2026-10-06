@@ -5,6 +5,7 @@ import { ClipboardCheck } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { EssentialReason } from "@/components/ui/essential-reason";
 import { PriorityBadge } from "@/components/ui/priority-badge";
 import { Field, Input, RequiredMark, RequiredNote, Select, Textarea } from "@/components/ui/field";
 import { useFieldErrors } from "@/components/ui/form-feedback";
@@ -141,9 +142,7 @@ export function ReviewDialog(props: {
                       <p className="flex flex-wrap items-center gap-2 font-medium"><PriorityBadge priority={item.priority} size="sm" />{item.line}. {item.description}</p>
                       <p className="tabular text-sm text-navy/60">Requested {item.quantity.replace(/\.00$/, "")} × {formatCents(parseMoney(item.estimatedUnitPrice) ?? 0n, props.currency)}</p>
                     </div>
-                    {item.essentialJustification ? (
-                      <p className="mt-1 rounded-lg bg-energy-orange/10 px-2 py-1 text-[13px]"><span className="font-bold">Why essential:</span> {item.essentialJustification}</p>
-                    ) : null}
+                    <EssentialReason reason={item.priority === "essential" ? item.essentialJustification : null} />
                     <div className="mt-2 grid items-start gap-2 sm:grid-cols-[10rem_7rem_9rem_1fr]">
                       <Field label={<>Decision <span className="sr-only">for line {item.line}</span></>} htmlFor={`rv_decision_${index}`}>
                         <Select value={line.decision} disabled={decision === "approve"}
