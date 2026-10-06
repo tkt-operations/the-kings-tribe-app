@@ -1,26 +1,120 @@
 @import "tailwindcss";
 
+/*
+ * The Kings Tribe design tokens — taken directly from the official palette
+ * (brand-assets/colors/TKT_Color Palletes.pdf) and typography guide.
+ * Tints are produced with opacity of these colors only; no new hues.
+ *
+ *   Primary (60–70%)   Deep Navy #12172D · Royal Gold #F3C94A · Black · White
+ *   Secondary (20–30%) Ministry Blue #3166DD · Energy Orange #FD5820
+ *                      Kingdom Green #0D7050 · Neutral Gray #EDF0F4
+ *   Accent (5–10%)     Highlight Yellow #FFFD38 · Fresh Lime #99E555
+ */
+@theme {
+  --color-navy: #12172d;
+  --color-gold: #f3c94a;
+  --color-ink: #000000;
+  --color-white: #ffffff;
+  --color-ministry-blue: #3166dd;
+  --color-energy-orange: #fd5820;
+  --color-kingdom-green: #0d7050;
+  --color-neutral-gray: #edf0f4;
+  --color-highlight: #fffd38;
+  --color-lime: #99e555;
+
+  --font-serif: var(--font-dm-serif), "DM Serif Display", Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-satoshi), "Satoshi", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* App-scale type (brand ratios H1 > H2 > H3 > body > caption, sized for UI) */
+  --text-display: 2.75rem;
+  --text-display--line-height: 1.05;
+  --text-title: 2rem;
+  --text-title--line-height: 1.1;
+  --text-section: 1.5rem;
+  --text-section--line-height: 1.2;
+
+  --radius-card: 1.25rem;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-neutral-gray);
+  color: var(--color-navy);
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum" 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* Tabular figures for every number column and money value */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Signature: short Royal Gold rule beneath serif headings (as in the guidelines) */
+.gold-rule::after {
+  content: "";
+  display: block;
+  width: 3.25rem;
+  height: 3px;
+  margin-top: 0.75rem;
+  border-radius: 2px;
+  background: var(--color-gold);
+}
+
+/* The official pattern, used only as a quiet texture on navy surfaces */
+.brand-pattern {
+  background-image: url("/brand/pattern-white.svg");
+  background-size: 640px auto;
+  background-repeat: repeat;
+}
+
+/* Inputs: iOS zooms on focus below 16px — keep form text at 16px+ */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--color-gold) 85%, transparent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media print {
+  body {
+    background: white;
+  }
+  .no-print {
+    display: none !important;
+  }
 }
