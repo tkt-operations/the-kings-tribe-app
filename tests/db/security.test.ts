@@ -196,3 +196,24 @@ describe("internal roles and RLS", () => {
     ]);
   });
 });
+
+describe("privilege escalation guards", () => {
+  it("a non-administrator user manager cannot grant Administrator or change permissions", async () => {
+    const managerId = await createUser(db, "manager@example.org", ["viewer"]);
+    // Give a custom role users.manage (as superuser) and assign it.
+    const { id: roleId } = await one<{ id: string }>(db, "insert into public.roles (key, name) values ('people_manager', 'People manager') returning id");
+    await db.query("insert into public.role_permissions (role_id, permission_key) values ($1, 'users.manage')", [roleId]);
+    await db.query("insert into public.user_roles (user_id, role_id) values ($1, $2)", [managerId, roleId]);
+    const adminRole = await one<{ id: string }>(db, "select id from public.roles where key = 'administrator'");
+    const viewerRole = await one<{ id: string }>(db, "select id from public.roles where key = 'viewer'");
+    await as(db, "authenticated", managerId, async () => {
+      await expectError(db.query("insert into public.user_roles (user_id, role_id) values ($1, $2)", [managerId, adminRole.id]), /row-level security/);
+      await expectError(db.query("insert into public.role_permissions (role_id, permission_key) values ($1, 'finance.view')", [viewerRole.id]), /row-level security/);
+      // Ordinary role assignment still works
+      await db.query("insert into public.user_roles (user_id, role_id) values ($1, $2) on conflict do nothing", [financeUserId, viewerRole.id]);
+    });
+    await as(db, "authenticated", adminId, async () => {
+      await db.query("insert into public.role_permissions (role_id, permission_key) values ($1, 'finance.view') on conflict do nothing", [viewerRole.id]);
+    });
+  });
+});
