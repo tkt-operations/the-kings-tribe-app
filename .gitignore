@@ -1,6 +1,37 @@
-.env
-.env.local
-.env.*.local
-node_modules/
-.next/
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+/build
+
+# misc
 .DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# env files — NEVER commit secrets. .env.example is the only committed template.
+.env
+.env.*
+!.env.example
+
+# vercel
+.vercel
+
+# supabase local
+/supabase/.branches
+/supabase/.temp
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
