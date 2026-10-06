@@ -1,13 +1,16 @@
 import Link from "next/link";
-import { CheckCircle2, Circle } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { Card, CardBody } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { requirePagePermission } from "@/lib/auth";
 import { getChurchSettings } from "@/lib/data/settings";
+import { loadSetupProgress } from "@/lib/setup/load";
+import type { SetupStepStatus } from "@/lib/setup/progress";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { listTimezones } from "@/lib/timezones";
 import { SettingsForm } from "../settings/settings-form";
 import { CompleteSetupButton } from "./complete-button";
+import { SetupStepList } from "./setup-step-list";
 
 export const metadata = { title: "Setup wizard" };
 
@@ -15,52 +18,50 @@ export default async function SetupWizardPage({ searchParams }: PageProps<"/admi
   await requirePagePermission("settings.manage");
   const settings = await getChurchSettings();
   if (!settings) return null;
-  const supabase = await createSupabaseServerClient();
-  const [{ count: userCount }, { count: linkCount }, { count: deptCount }, { count: catCount }] = await Promise.all([
-    supabase.from("profiles").select("id", { count: "exact", head: true }),
-    supabase.from("external_form_tokens").select("id", { count: "exact", head: true }),
-    supabase.from("departments").select("id", { count: "exact", head: true }).eq("is_active", true),
-    supabase.from("categories").select("id", { count: "exact", head: true }).eq("is_active", true),
-  ]);
+  // Completion comes from what is saved in the database — never from browser state.
+  const progress = await loadSetupProgress(await createSupabaseServerClient());
   const params = await searchParams;
   const step = Number(params.step) || 1;
+  const timezones = listTimezones(settings.timezone);
 
-  const steps = [
-    { n: 1, title: "Church information", done: Boolean(settings.address_line1 && settings.phone && settings.email), body: <SettingsForm settings={settings} timezones={listTimezones(settings.timezone)} sections={["church", "money"]} /> },
-    { n: 2, title: "Notification email & policies", done: Boolean(settings.finance_notification_email), body: <SettingsForm settings={settings} timezones={listTimezones(settings.timezone)} sections={["notifications", "policy"]} /> },
-    { n: 3, title: "Categories", done: (catCount ?? 0) > 0, body: <Explain href="/categories" label="Review categories">Attendance (Adult, Children’s), finance (Offering, Tithe, Church Outreach) and expense categories are already created. Add Youth, Volunteers, Guests or anything else you track. Starter budget lines are under “Budget lines”.</Explain> },
-    { n: 4, title: "Departments", done: (deptCount ?? 0) > 0, body: <Explain href="/departments" label="Review departments">Production, Hospitality and Children’s Ministry teams are set up with their subcategories. Add or rename to match your church.</Explain> },
-    { n: 5, title: "Invite your team", done: (userCount ?? 0) > 1, body: <Explain href="/admin/users" label="Invite users">Invite the rest of the finance and operations team (about 5 people) and assign each a role. Department leads do not need accounts.</Explain> },
-    { n: 6, title: "Create a requisition link", done: (linkCount ?? 0) > 0, body: <Explain href="/admin/form-links" label="Create a link">Create a secure link and send it to department and ministry leads so they can submit requisitions.</Explain> },
-  ];
-  const current = steps.find((s) => s.n === step) ?? steps[0];
+  const bodies: Record<number, React.ReactNode> = {
+    1: <SettingsForm settings={settings} timezones={timezones} sections={["church", "money"]} />,
+    2: <SettingsForm settings={settings} timezones={timezones} sections={["notifications", "policy"]} requireNotificationEmail />,
+    3: <Explain href="/categories" label="Review categories">Attendance (Adult, Children’s), finance (Offering, Tithe, Church Outreach) and expense categories are already created. Add Youth, Volunteers, Guests or anything else you track. Starter budget lines are under “Budget lines”.</Explain>,
+    4: <Explain href="/departments" label="Review departments">Production, Hospitality and Children’s Ministry teams are set up with their subcategories. Add or rename to match your church.</Explain>,
+    5: <Explain href="/admin/users" label="Invite users">Invite the rest of the finance and operations team (about 5 people) and assign each a role. Department leads do not need accounts. This step is recommended but not required to finish setup.</Explain>,
+    6: <Explain href="/admin/form-links" label="Create a link">Create a secure link and send it to department and ministry leads so they can submit requisitions.</Explain>,
+  };
+  const current = progress.steps.find((s) => s.n === step) ?? progress.steps[0];
 
   return (
     <>
       <PageHeader eyebrow="First-time setup" title="Setup wizard" description="Work through each step. You can return to any of these pages later from Administration." />
       <div className="grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <ol className="space-y-1">
-          {steps.map((s) => (
-            <li key={s.n}>
-              <Link href={`/admin/setup?step=${s.n}`} aria-current={s.n === current.n ? "step" : undefined}
-                className={`flex min-h-12 items-center gap-3 rounded-xl px-3 text-[15px] ${s.n === current.n ? "bg-navy text-white" : "hover:bg-white"}`}>
-                {s.done ? <CheckCircle2 className="size-5 text-kingdom-green" aria-hidden /> : <Circle className={`size-5 ${s.n === current.n ? "text-gold" : "text-navy/30"}`} aria-hidden />}
-                <span>{s.n}. {s.title}</span>
-              </Link>
-            </li>
-          ))}
-          <li className="pt-4"><CompleteSetupButton done={Boolean(settings.setup_completed_at)} /></li>
-        </ol>
+        <SetupStepList steps={progress.steps} currentStep={current.n} completed={progress.completed} total={progress.total}>
+          <CompleteSetupButton done={Boolean(settings.setup_completed_at)} outstanding={progress.incompleteRequired.map((s) => `Step ${s.n} — ${s.title}`)} />
+        </SetupStepList>
         <section aria-labelledby="step-title">
-          <h2 id="step-title" className="mb-4 font-serif text-section">{current.n}. {current.title}</h2>
-          {current.body}
+          <h2 id="step-title" className="mb-2 font-serif text-section">{current.n}. {current.title}</h2>
+          <StepStatus step={current} />
+          {bodies[current.n]}
           <div className="mt-6 flex justify-between">
             {current.n > 1 ? <Link href={`/admin/setup?step=${current.n - 1}`} className="rounded-xl px-4 py-3 font-medium ring-1 ring-navy/15">Back</Link> : <span />}
-            {current.n < steps.length ? <Link href={`/admin/setup?step=${current.n + 1}`} className="rounded-xl bg-navy px-4 py-3 font-medium text-gold">Next step</Link> : null}
+            {current.n < progress.total ? <Link href={`/admin/setup?step=${current.n + 1}`} className="rounded-xl bg-navy px-4 py-3 font-medium text-gold">Next step</Link> : null}
           </div>
         </section>
       </div>
     </>
+  );
+}
+
+function StepStatus({ step }: { step: SetupStepStatus }) {
+  if (step.done) return <p className="mb-4 flex items-center gap-1.5 text-sm font-medium text-kingdom-green"><CheckCircle2 className="size-4" aria-hidden /> This step is complete.</p>;
+  return (
+    <div className="mb-4 text-sm text-navy/70">
+      <p className="font-medium text-navy">To complete this step:</p>
+      <ul className="mt-1 list-disc pl-5">{step.missing.map((m) => <li key={m}>{m}</li>)}</ul>
+    </div>
   );
 }
 

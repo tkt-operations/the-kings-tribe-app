@@ -49,7 +49,7 @@ export async function inviteUser(input: z.input<typeof inviteSchema>): Promise<A
     const { error: roleError } = await supabase.from("user_roles").insert(v.role_ids.map((role_id) => ({ user_id: userId, role_id })));
     if (roleError) throw new ActionError(friendlyDbError(roleError));
     revalidatePath("/admin/users");
-    return { ok: true, data: { link }, message: v.delivery === "email" ? `Invitation sent successfully to ${v.email}.` : "Invitation link created. Send it to the person privately — it can only be used once." };
+    return { ok: true, data: { link }, message: v.delivery === "email" ? `Team member invited successfully. An invitation was emailed to ${v.email}.` : "Team member invited successfully. Send them this invitation link privately — it can only be used once." };
   } catch (e) {
     return fail(e);
   }

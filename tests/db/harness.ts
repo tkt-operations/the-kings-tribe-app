@@ -57,10 +57,11 @@ grant execute on function storage.foldername(text), storage.extension(text) to a
 
 export type Db = PGlite;
 
-export async function createTestDatabase(): Promise<Db> {
-  const db = new PGlite();
-  await db.exec(SUPABASE_STUBS);
-  const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql")).sort();
+function migrationFiles(): string[] {
+  return readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql")).sort();
+}
+
+async function apply(db: Db, files: string[]) {
   for (const file of files) {
     const sql = readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
     try {
@@ -69,7 +70,24 @@ export async function createTestDatabase(): Promise<Db> {
       throw new Error(`Migration ${file} failed: ${(error as Error).message}`);
     }
   }
+}
+
+/**
+ * Fresh database with the migrations applied. Pass `before` (a migration
+ * filename) to stop just before it — e.g. to load data in the previous schema
+ * and then test a later migration's backfill with `applyMigrationsFrom`.
+ */
+export async function createTestDatabase(options: { before?: string } = {}): Promise<Db> {
+  const db = new PGlite();
+  await db.exec(SUPABASE_STUBS);
+  const files = migrationFiles();
+  await apply(db, options.before ? files.filter((f) => f < options.before!) : files);
   return db;
+}
+
+/** Apply the remaining migrations, starting with `first`. */
+export async function applyMigrationsFrom(db: Db, first: string): Promise<void> {
+  await apply(db, migrationFiles().filter((f) => f >= first));
 }
 
 type Role = "anon" | "authenticated" | "service_role";

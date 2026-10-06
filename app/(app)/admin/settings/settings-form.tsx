@@ -9,24 +9,21 @@ import { LoadingButton } from "@/components/ui/submit-button";
 import { useAction } from "@/components/ui/use-action";
 import { issuesToFieldErrors } from "@/lib/action-result";
 import type { ChurchSettings } from "@/lib/data/settings";
-import { settingsSchema } from "@/lib/validation/settings";
+import { ALL_SETTINGS_SECTIONS, sectionSchema, type SettingsSection } from "@/lib/validation/settings";
 import { saveSettings } from "./actions";
-
-type Section = "church" | "money" | "notifications" | "policy";
-
-const SECTION_FIELDS: Record<Section, string[]> = {
-  church: ["church_name", "address_line1", "address_line2", "city", "region", "postal_code", "country", "phone", "email", "website"],
-  money: ["currency_code", "timezone"],
-  notifications: ["finance_notification_email"],
-  policy: ["requisition_policy", "po_instructions", "po_footer"],
-};
 
 const CURRENCIES = ["USD", "CAD", "GBP", "EUR", "NGN", "GHS", "KES", "ZAR", "AUD", "NZD"];
 
-export function SettingsForm({ settings, timezones, sections = ["church", "money", "notifications", "policy"] }: {
+/**
+ * Edits one or more settings sections. Only the shown sections are validated
+ * and saved, so each setup-wizard step stands on its own.
+ */
+export function SettingsForm({ settings, timezones, sections = ALL_SETTINGS_SECTIONS, requireNotificationEmail = false }: {
   settings: ChurchSettings;
   timezones: string[];
-  sections?: Section[];
+  sections?: SettingsSection[];
+  /** Setup wizard step 2: a Finance notification address is part of completing the step. */
+  requireNotificationEmail?: boolean;
 }) {
   const [v, setV] = useState({
     church_name: settings.church_name ?? "",
@@ -48,22 +45,12 @@ export function SettingsForm({ settings, timezones, sections = ["church", "money
   });
   const formRef = useRef<HTMLFormElement>(null);
   const fields = useFieldErrors();
-  const [hiddenError, setHiddenError] = useState<string | null>(null);
   const { pending, error, run } = useAction();
   const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setV({ ...v, [k]: e.target.value });
     fields.clear(k);
   };
   const err = (k: string) => fields.errors[k];
-  const visible = new Set(sections.flatMap((s) => SECTION_FIELDS[s]));
-
-  /** Errors for fields on this screen go inline; others (another wizard step) become a form-level message. */
-  function showErrors(all: Record<string, string>) {
-    const inline = Object.fromEntries(Object.entries(all).filter(([k]) => visible.has(k)));
-    const elsewhere = Object.entries(all).filter(([k]) => !visible.has(k));
-    setHiddenError(elsewhere.length ? `Another settings section needs attention: ${elsewhere[0][1]}` : null);
-    return inline;
-  }
 
   return (
     <form
@@ -72,22 +59,18 @@ export function SettingsForm({ settings, timezones, sections = ["church", "money
       noValidate
       onSubmit={(e) => {
         e.preventDefault();
-        const parsed = settingsSchema.safeParse(v);
+        const parsed = sectionSchema(sections, { requireNotificationEmail }).safeParse(v);
         if (!parsed.success) {
-          const all = issuesToFieldErrors(parsed.error.issues);
-          const inline = showErrors(all);
-          if (Object.keys(inline).length) fields.check(inline, formRef.current);
+          fields.check(issuesToFieldErrors(parsed.error.issues), formRef.current);
           return;
         }
-        setHiddenError(null);
-        run(() => saveSettings(v), {
-          successMessage: "Settings saved successfully.",
-          onError: (_e, fe) => fields.show(fe ? showErrors(fe) : undefined, formRef.current),
+        run(() => saveSettings(v, { sections, requireNotificationEmail }), {
+          errorMessage: "Settings could not be saved. Please try again.",
+          onError: (_e, fe) => fields.show(fe, formRef.current),
         });
       }}
     >
       {error ? <Alert tone="error">{error}</Alert> : null}
-      {hiddenError ? <Alert tone="error">{hiddenError}</Alert> : null}
       <RequiredNote />
 
       {sections.includes("church") ? (
@@ -95,14 +78,14 @@ export function SettingsForm({ settings, timezones, sections = ["church", "money
           <CardHeader title="Church information" description="Shown on the requisition form, emails and Purchase Orders." />
           <CardBody className="grid gap-4 sm:grid-cols-2">
             <Field className="sm:col-span-2" label="Church name" htmlFor="church_name" required error={err("church_name")}><Input id="church_name" value={v.church_name} onChange={set("church_name")} /></Field>
-            <Field label="Address line 1" htmlFor="address_line1" error={err("address_line1")}><Input id="address_line1" autoComplete="address-line1" value={v.address_line1} onChange={set("address_line1")} /></Field>
+            <Field label="Address line 1" htmlFor="address_line1" required error={err("address_line1")}><Input id="address_line1" autoComplete="address-line1" value={v.address_line1} onChange={set("address_line1")} /></Field>
             <Field label="Address line 2" htmlFor="address_line2"><Input id="address_line2" autoComplete="address-line2" value={v.address_line2} onChange={set("address_line2")} /></Field>
             <Field label="City" htmlFor="city"><Input id="city" value={v.city} onChange={set("city")} /></Field>
             <Field label="State / region" htmlFor="region"><Input id="region" value={v.region} onChange={set("region")} /></Field>
             <Field label="Postal code" htmlFor="postal_code"><Input id="postal_code" value={v.postal_code} onChange={set("postal_code")} /></Field>
             <Field label="Country" htmlFor="country"><Input id="country" value={v.country} onChange={set("country")} /></Field>
-            <Field label="Phone" htmlFor="phone"><Input id="phone" type="tel" inputMode="tel" value={v.phone} onChange={set("phone")} /></Field>
-            <Field label="Email" htmlFor="email" error={err("email")}><Input id="email" type="email" inputMode="email" value={v.email} onChange={set("email")} /></Field>
+            <Field label="Phone" htmlFor="phone" required error={err("phone")}><Input id="phone" type="tel" inputMode="tel" value={v.phone} onChange={set("phone")} /></Field>
+            <Field label="Church email" htmlFor="email" required error={err("email")}><Input id="email" type="email" inputMode="email" value={v.email} onChange={set("email")} /></Field>
             <Field className="sm:col-span-2" label="Website" htmlFor="website" error={err("website")}><Input id="website" type="url" inputMode="url" value={v.website} onChange={set("website")} placeholder="https://" /></Field>
           </CardBody>
         </Card>
@@ -128,9 +111,9 @@ export function SettingsForm({ settings, timezones, sections = ["church", "money
 
       {sections.includes("notifications") ? (
         <Card>
-          <CardHeader title="Notifications" description="Where new requisitions and receipts are announced. Leave blank to notify everyone with the Head of Finance permission." />
+          <CardHeader title="Notifications" description={requireNotificationEmail ? "Where new requisitions and receipts are announced." : "Where new requisitions and receipts are announced. Leave blank to notify everyone with the Head of Finance permission."} />
           <CardBody>
-            <Field label="Finance notification email(s)" htmlFor="finance_notification_email" error={err("finance_notification_email")} hint="Separate multiple addresses with commas.">
+            <Field label="Finance notification email(s)" htmlFor="finance_notification_email" required={requireNotificationEmail} error={err("finance_notification_email")} hint="Separate multiple addresses with commas.">
               <Input id="finance_notification_email" inputMode="email" value={v.finance_notification_email} onChange={set("finance_notification_email")} />
             </Field>
           </CardBody>
