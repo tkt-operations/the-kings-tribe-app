@@ -36,7 +36,8 @@ export interface FormContext {
   cost_centers: { id: string; code: string; name: string; department_id: string | null }[];
 }
 
-export const FORM_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
+export { FORM_TOKEN_PATTERN } from "@/lib/validation/form-token";
+import { FORM_TOKEN_PATTERN } from "@/lib/validation/form-token";
 
 /** Loads the public form context with the ANON key (database checks the token). */
 export async function loadFormContext(token: string): Promise<FormContext | null> {
