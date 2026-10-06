@@ -5,6 +5,7 @@ import { withDecimals } from "@/lib/data/decimal";
 import type { RequisitionStatus } from "@/lib/workflow/status";
 import type { WorkflowKind } from "@/lib/workflow/request-types";
 import type { Priority } from "@/lib/priority";
+import type { NotificationRow } from "@/lib/email/delivery-events";
 
 export interface RequisitionItem {
   id: string;
@@ -131,7 +132,7 @@ export interface RequisitionDetail {
   }[];
   disbursements: { id: string; amount: string; method: string; paid_on: string; reference: string | null; notes: string | null; recorded_by: string | null; created_at: string }[];
   audit: { id: string; occurred_at: string; actor_id: string | null; actor_label: string | null; action: string; metadata: Record<string, unknown> }[];
-  notifications: { id: string; channel: string; template: string; recipient: string; status: string; error: string | null; created_at: string }[];
+  notifications: NotificationRow[];
   people: Map<string, string>;
 }
 
@@ -199,7 +200,7 @@ export async function loadRequisitionDetail(id: string): Promise<RequisitionDeta
       .order("created_at"),
     supabase.from("disbursements").select("*").eq("requisition_id", id).order("paid_on"),
     supabase.from("audit_logs").select("id, occurred_at, actor_id, actor_label, action, metadata").eq("requisition_id", id).order("occurred_at", { ascending: false }).limit(200),
-    supabase.from("notifications").select("id, channel, template, recipient, status, error, created_at").eq("requisition_id", id).order("created_at", { ascending: false }).limit(50),
+    supabase.from("notifications").select("id, channel, template, recipient, status, error, created_at, delivery_status, delivery_status_at, notification_events(event_type, occurred_at, detail)").eq("requisition_id", id).order("created_at", { ascending: false }).limit(50),
     supabase.from("profiles").select("id, full_name, email"),
   ]);
 

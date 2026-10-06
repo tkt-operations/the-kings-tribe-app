@@ -7,6 +7,7 @@ const PUBLIC_PREFIXES = [
   "/notifications/",
   "/setup",
   "/api/inbound-email",
+  "/api/email-events", // Resend delivery webhook — authenticated by Svix signature, not a session
   "/offline",
   // Development-only design previews (pages return 404 in production).
   "/dev-preview",

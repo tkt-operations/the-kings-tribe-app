@@ -17,6 +17,7 @@ import { countByPriority, isPriority, PRIORITY_LABELS } from "@/lib/priority";
 import { PriorityEditor } from "./priority-editor";
 import { toItemModel } from "./item-model";
 import { LineItemsTable } from "./line-items-table";
+import { NotificationLog } from "./notification-log";
 import { Timeline } from "./timeline";
 import { ReviewDialog } from "./review-dialog";
 import { PurchaseOrderDialog } from "./purchase-order-dialog";
@@ -510,16 +511,7 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
                     </li>
                   ))}
                 </ul>
-                {d.notifications.length ? (
-                  <>
-                    <p className="mb-2 mt-5 text-sm font-bold">Notifications</p>
-                    <ul className="space-y-1 text-[13px] text-navy/70">
-                      {d.notifications.map((n) => (
-                        <li key={n.id}>{formatDateTime(n.created_at, tz)} · {n.channel} · {n.template.replace(/_/g, " ")} · <span className="font-medium">{n.status}</span>{n.error ? ` (${n.error})` : ""}</li>
-                      ))}
-                    </ul>
-                  </>
-                ) : null}
+                <NotificationLog notifications={d.notifications} timezone={tz} />
               </CardBody>
             </details>
           </Card>
