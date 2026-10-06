@@ -1,7 +1,7 @@
 "use client";
 
-import { useTransition } from "react";
 import { ManageList, type ManageItem } from "@/components/config/manage-list";
+import { useAction } from "@/components/ui/use-action";
 import { createCategory, moveCategory, renameCategory, setCategoryActive, setCategoryAllowsNegative } from "./actions";
 
 export function CategoryManager({
@@ -13,7 +13,7 @@ export function CategoryManager({
   items: ManageItem[];
   negatives: Record<string, boolean>;
 }) {
-  const [, startTransition] = useTransition();
+  const { pending, run } = useAction();
   return (
     <ManageList
       items={items}
@@ -34,10 +34,13 @@ export function CategoryManager({
                   type="checkbox"
                   className="size-4 accent-navy"
                   defaultChecked={negatives[item.id]}
+                  disabled={pending}
                   onChange={(e) => {
-                    const checked = e.target.checked;
-                    startTransition(async () => {
-                      await setCategoryAllowsNegative(item.id, checked);
+                    const box = e.currentTarget;
+                    const checked = box.checked;
+                    run(() => setCategoryAllowsNegative(item.id, checked), {
+                      successMessage: checked ? `Adjustments allowed for ${item.name}.` : `Adjustments turned off for ${item.name}.`,
+                      onError: () => { box.checked = !checked; }, // put the box back as it was saved
                     });
                   }}
                 />

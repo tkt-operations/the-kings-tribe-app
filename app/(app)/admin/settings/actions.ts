@@ -20,7 +20,7 @@ export async function saveSettings(input: z.input<typeof settingsSchema>): Promi
     const { error } = await supabase.from("church_settings").update({ ...parsed.data, updated_by: user.id }).eq("id", 1);
     if (error) throw new ActionError(friendlyDbError(error));
     revalidatePath("/", "layout");
-    return { ok: true, data: undefined, message: "Settings saved." };
+    return { ok: true, data: undefined, message: "Settings saved successfully." };
   } catch (e) {
     return toActionError(e);
   }
@@ -33,7 +33,7 @@ export async function completeSetup(): Promise<ActionResult> {
     const { error } = await supabase.from("church_settings").update({ setup_completed_at: new Date().toISOString() }).eq("id", 1);
     if (error) throw new ActionError(friendlyDbError(error));
     revalidatePath("/", "layout");
-    return { ok: true, data: undefined, message: "Setup marked complete." };
+    return { ok: true, data: undefined, message: "Setup completed successfully." };
   } catch (e) {
     return toActionError(e);
   }

@@ -17,7 +17,7 @@ export async function assignUnmatchedReceipt(receiptId: string, requisitionNumbe
     if (error) throw new ActionError(friendlyDbError(error));
     revalidatePath("/receipts");
     revalidatePath(`/requisitions/${req.id}`);
-    return { ok: true, data: undefined, message: `Assigned to ${number}.` };
+    return { ok: true, data: undefined, message: `Receipt assigned to ${number} successfully.` };
   } catch (e) {
     if (e instanceof z.ZodError) return { ok: false, error: e.issues[0]?.message ?? "Invalid input" };
     return toActionError(e);

@@ -19,5 +19,5 @@ export async function updatePreferences(token: string, emailOptIn: boolean, smsO
     .select("requisition_id")
     .maybeSingle();
   if (error || !data) return { ok: false, error: "This link is not valid." };
-  return { ok: true, data: undefined, message: "Your preferences were saved." };
+  return { ok: true, data: undefined, message: "Your preferences were saved successfully." };
 }

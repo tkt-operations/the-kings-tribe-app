@@ -1,34 +1,50 @@
 "use client";
 
-import { useActionState } from "react";
 import { Alert } from "@/components/ui/alert";
-import { Field, Input } from "@/components/ui/field";
-import { SubmitButton } from "@/components/ui/submit-button";
+import { Field, Input, RequiredNote } from "@/components/ui/field";
+import { LoadingButton } from "@/components/ui/submit-button";
+import { useServerForm } from "@/components/ui/use-server-form";
+import { rules, validate } from "@/lib/validation/form";
 import { createFirstAdministrator } from "./actions";
 
+export function validateSetup(fd: FormData) {
+  const get = (k: string) => String(fd.get(k) ?? "");
+  return validate({
+    setup_token: [get("setup_token"), rules.required("Setup token is required.")],
+    full_name: [get("full_name"), rules.required("Full name is required."), rules.minLength(2, "Enter your full name.")],
+    email: [get("email"), rules.required("Email address is required."), rules.email()],
+    password: [get("password"), rules.required("Password is required."), rules.minLength(12, "Use at least 12 characters.")],
+    confirm: [get("confirm"), rules.required("Confirm your password."), rules.matches(get("password"), "Passwords do not match.")],
+  });
+}
+
 export function SetupForm() {
-  const [state, action] = useActionState(createFirstAdministrator, undefined);
+  const { formRef, onSubmit, pending, state, errors, clearError } = useServerForm(createFirstAdministrator, {
+    validate: validateSetup,
+    errorMessage: "Unable to create the administrator. Please try again.",
+  });
   return (
-    <form action={action} className="space-y-5" noValidate>
-      {state?.error ? <Alert tone="error">{state.error}</Alert> : null}
-      <Field label="Setup token" htmlFor="setup_token" hint="The SETUP_TOKEN value from your server environment variables.">
-        <Input id="setup_token" name="setup_token" type="password" autoComplete="off" required />
+    <form ref={formRef} onSubmit={onSubmit} className="space-y-5" noValidate>
+      {state?.error ? <Alert tone="error" title="The administrator was not created">{state.error}</Alert> : null}
+      <RequiredNote />
+      <Field label="Setup token" htmlFor="setup_token" required error={errors.setup_token} hint="The SETUP_TOKEN value from your server environment variables.">
+        <Input id="setup_token" name="setup_token" type="password" autoComplete="off" onChange={() => clearError("setup_token")} />
       </Field>
-      <Field label="Your full name" htmlFor="full_name">
-        <Input id="full_name" name="full_name" autoComplete="name" required />
+      <Field label="Your full name" htmlFor="full_name" required error={errors.full_name}>
+        <Input id="full_name" name="full_name" autoComplete="name" maxLength={120} onChange={() => clearError("full_name")} />
       </Field>
-      <Field label="Your email" htmlFor="email">
-        <Input id="email" name="email" type="email" inputMode="email" autoComplete="email" autoCapitalize="none" required />
+      <Field label="Your email address" htmlFor="email" required error={errors.email}>
+        <Input id="email" name="email" type="email" inputMode="email" autoComplete="email" autoCapitalize="none" onChange={() => clearError("email")} />
       </Field>
-      <Field label="Password" htmlFor="password" hint="At least 12 characters.">
-        <Input id="password" name="password" type="password" autoComplete="new-password" minLength={12} required />
+      <Field label="Password" htmlFor="password" required error={errors.password} hint="At least 12 characters.">
+        <Input id="password" name="password" type="password" autoComplete="new-password" onChange={() => clearError("password")} />
       </Field>
-      <Field label="Confirm password" htmlFor="confirm">
-        <Input id="confirm" name="confirm" type="password" autoComplete="new-password" minLength={12} required />
+      <Field label="Confirm password" htmlFor="confirm" required error={errors.confirm}>
+        <Input id="confirm" name="confirm" type="password" autoComplete="new-password" onChange={() => clearError("confirm")} />
       </Field>
-      <SubmitButton size="lg" className="w-full" pendingLabel="Creating administrator…">
+      <LoadingButton type="submit" size="lg" className="w-full" pending={pending} pendingLabel="Creating administrator…">
         Create administrator
-      </SubmitButton>
+      </LoadingButton>
     </form>
   );
 }

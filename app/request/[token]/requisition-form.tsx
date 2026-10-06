@@ -1,14 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useFieldArray, useForm, useWatch, type FieldErrors, type Path } from "react-hook-form";
+import { useMemo, useRef, useState } from "react";
+import { useFieldArray, useForm, useWatch, type Path } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CheckCircle2, FileUp, Paperclip, Plus, Trash2 } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
-import { Checkbox, Field, FieldError, Input, Select, Textarea } from "@/components/ui/field";
-import { Spinner } from "@/components/ui/submit-button";
+import { Checkbox, Field, FieldError, Input, RequiredMark, RequiredNote, Select, Textarea } from "@/components/ui/field";
+import { focusFirstInvalidSoon, REVIEW_FIELDS_MESSAGE } from "@/components/ui/form-feedback";
+import { LoadingButton } from "@/components/ui/submit-button";
+import { useToast } from "@/components/ui/toast";
+import { isNavigationSignal } from "@/components/ui/use-action";
 import { cn } from "@/lib/cn";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatCents, formatMoney, lineTotal, parseMoney, parseQuantity } from "@/lib/money";
@@ -36,10 +39,14 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
   const [fileError, setFileError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [phase, setPhase] = useState<"idle" | "uploading" | "submitting">("idle");
+  const inFlight = useRef(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const toast = useToast();
 
   const form = useForm<RequisitionInput>({
     resolver: zodResolver(schema),
     mode: "onTouched",
+    shouldFocusError: false, // focusFirstInvalidSoon focuses in document order instead
     defaultValues: {
       requester_name: "",
       requester_email: "",
@@ -86,10 +93,12 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
       const check = checkReceiptFile(file);
       if (!check.ok) {
         setFileError(check.error);
+        toast.error(check.error);
         continue;
       }
       if (next.length >= RECEIPT_MAX_FILES) {
         setFileError(`Attach at most ${RECEIPT_MAX_FILES} files.`);
+        toast.error(`Attach at most ${RECEIPT_MAX_FILES} files.`);
         break;
       }
       next.push(file);
@@ -98,7 +107,9 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
     setValue("receipt_count", next.length, { shouldValidate: true });
   }
 
-  const onSubmit = handleSubmit(async (values, event) => {
+  const submitValid = async (values: RequisitionInput, event?: React.BaseSyntheticEvent) => {
+    if (inFlight.current) return; // a submission is already running
+    inFlight.current = true;
     const formEl = (event?.target as HTMLFormElement | undefined) ?? null;
     const honeypotValue = (formEl?.elements.namedItem("website") as HTMLInputElement | null)?.value ?? "";
     setSubmitError(null);
@@ -107,11 +118,11 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
       if (showReceipts && files.length) {
         setPhase("uploading");
         const prepared = await prepareReceiptUploads(token, files.map((f) => ({ name: f.name, type: f.type, size: f.size })));
-        if (!prepared.ok) throw new Error(prepared.error);
+        if (!prepared.ok) throw new SubmitFailure(prepared.error);
         const supabase = createSupabaseBrowserClient();
         for (const [i, slot] of prepared.data.entries()) {
           const { error } = await supabase.storage.from("receipts").uploadToSignedUrl(slot.path, slot.signedToken, files[i], { contentType: slot.contentType });
-          if (error) throw new Error(`Could not upload ${files[i].name}. Please try again.`);
+          if (error) throw new SubmitFailure(`Receipt upload failed for ${files[i].name}. Please try again.`);
           uploaded.push({ path: slot.path, original_filename: slot.originalName });
         }
       } else {
@@ -120,22 +131,36 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
       setPhase("submitting");
       const result = await submitExternalRequisition(token, { ...values, receipt_count: uploaded.length }, uploaded, stamp, honeypotValue);
       if (!result.ok) {
-        for (const [path, message] of Object.entries(result.fieldErrors ?? {})) setError(path as Path<RequisitionInput>, { message });
-        throw new Error(result.error);
+        const fieldErrors = Object.entries(result.fieldErrors ?? {});
+        for (const [path, message] of fieldErrors) setError(path as Path<RequisitionInput>, { message });
+        if (fieldErrors.length) focusFirstInvalidSoon(formRef.current);
+        throw new SubmitFailure(result.error);
       }
+      toast.success(`Requisition ${result.data.requisition_number} submitted successfully.`);
       window.scrollTo({ top: 0, behavior: "smooth" });
       onSubmitted(result.data);
     } catch (error) {
-      setSubmitError((error as Error).message || "Something went wrong. Please try again.");
+      if (isNavigationSignal(error)) throw error;
+      if (!(error instanceof SubmitFailure)) console.error(error);
+      const message = error instanceof SubmitFailure ? error.message : "Unable to submit requisition. Please review the form and try again.";
+      setSubmitError(message);
+      toast.error(message);
     } finally {
+      inFlight.current = false;
       setPhase("idle");
     }
-  }, (invalid) => focusFirstError(invalid));
+  };
+
+  const onSubmit = (event: React.FormEvent<HTMLFormElement>) =>
+    handleSubmit(submitValid, () => {
+      toast.error(REVIEW_FIELDS_MESSAGE);
+      focusFirstInvalidSoon(formRef.current);
+    })(event);
 
   const busy = phase !== "idle";
 
   return (
-    <form onSubmit={onSubmit} noValidate className="space-y-5">
+    <form ref={formRef} onSubmit={onSubmit} noValidate className="space-y-5" aria-busy={busy || undefined}>
       {/* Honeypot — hidden from people and assistive tech */}
       <div aria-hidden className="absolute -left-[9999px] h-px w-px overflow-hidden">
         <label htmlFor="website">Website</label>
@@ -145,6 +170,8 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
       <div className="rounded-[var(--radius-card)] bg-white p-1.5 shadow-sm shadow-navy/5">
         <Alert tone="warning" title="Requisition policy" className="border-0">{context.policy}</Alert>
       </div>
+
+      <RequiredNote className="px-1" />
 
       <Section number={1} title="About you">
         <div className="grid gap-4 sm:grid-cols-2">
@@ -199,8 +226,8 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
       </Section>
 
       <Section number={3} title="Request type">
-        <fieldset>
-          <legend className="sr-only">Request type</legend>
+        <fieldset role="radiogroup" aria-required="true" aria-invalid={errors.request_type_id ? true : undefined} aria-describedby={errors.request_type_id ? "request_type_id-error" : undefined}>
+          <legend className="sr-only">Request type (required)</legend>
           <div className="grid gap-2.5">
             {context.request_types.map((t) => {
               const selected = t.id === requestTypeId;
@@ -219,7 +246,7 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
               );
             })}
           </div>
-          <FieldError message={errors.request_type_id?.message} />
+          <FieldError id="request_type_id-error" message={errors.request_type_id?.message} />
         </fieldset>
 
         {requestType?.requires_purchase_details ? (
@@ -238,12 +265,14 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
 
         {showReceipts ? (
           <div className="mt-5">
-            <p className="mb-2 text-sm font-medium">Itemized receipt{requestType?.requires_receipt_on_submission ? " *" : ""}</p>
+            <p id="receipt-files-label" className="mb-2 text-sm font-medium">Itemized receipt{requestType?.requires_receipt_on_submission ? <RequiredMark /> : null}</p>
             <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-navy/20 bg-white p-5 text-center hover:border-navy/40">
               <FileUp className="size-6 text-navy/60" aria-hidden />
               <span className="text-sm font-medium">Take a photo or choose a file</span>
               <span className="text-xs text-navy/55">PDF, JPEG, PNG or HEIC · up to 10 MB each · max {RECEIPT_MAX_FILES}</span>
-              <input type="file" accept={RECEIPT_ACCEPT} multiple className="sr-only" onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
+              <input id="receipt_count" type="file" accept={RECEIPT_ACCEPT} multiple className="sr-only" onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }}
+                aria-labelledby="receipt-files-label" aria-required={requestType?.requires_receipt_on_submission || undefined}
+                aria-invalid={fileError || errors.receipt_count ? true : undefined} aria-describedby={fileError || errors.receipt_count ? "receipt_count-error" : undefined} />
             </label>
             {files.length ? (
               <ul className="mt-3 space-y-2">
@@ -258,7 +287,7 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
                 ))}
               </ul>
             ) : null}
-            <FieldError message={fileError ?? errors.receipt_count?.message} />
+            <FieldError id="receipt_count-error" live={Boolean(fileError)} message={fileError ?? errors.receipt_count?.message} />
           </div>
         ) : null}
       </Section>
@@ -271,8 +300,8 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
               {costCenters.map((c) => <option key={c.id} value={c.id}>{c.code} — {c.name}</option>)}
             </Select>
           </Field>
-          <fieldset>
-            <legend className="mb-2 text-sm font-medium">Is this purchase within your approved ministry budget? <span className="text-navy/50">*</span></legend>
+          <fieldset role="radiogroup" aria-required="true" aria-invalid={errors.budget_status ? true : undefined} aria-describedby={errors.budget_status ? "budget_status-error" : undefined}>
+            <legend className="mb-2 text-sm font-medium">Is this purchase within your approved ministry budget?<RequiredMark /></legend>
             <div className="grid grid-cols-3 gap-2">
               {(["yes", "no", "unsure"] as const).map((v) => (
                 <label key={v} className={cn("flex min-h-12 cursor-pointer items-center justify-center rounded-xl border text-[15px] font-medium",
@@ -282,7 +311,7 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
                 </label>
               ))}
             </div>
-            <FieldError message={errors.budget_status?.message} />
+            <FieldError id="budget_status-error" message={errors.budget_status?.message} />
           </fieldset>
           {budgetStatus && budgetStatus !== "yes" ? (
             <Field label="Please explain" htmlFor="budget_explanation" required error={errors.budget_explanation?.message}>
@@ -349,7 +378,7 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
           <Button type="button" variant="gold" size="lg" className="w-full" onClick={() => append({ ...EMPTY_ITEM })} disabled={fields.length >= 50}>
             <Plus className="size-5" aria-hidden /> Add Item
           </Button>
-          <FieldError message={errors.items?.message ?? errors.items?.root?.message} />
+          <FieldError message={errors.items?.message ?? errors.items?.root?.message} live />
           <div className="flex items-center justify-between rounded-2xl bg-navy px-5 py-4 text-white">
             <span className="text-sm font-medium text-white/75">Estimated requisition total</span>
             <span className="tabular font-serif text-3xl text-gold">{total === null ? "—" : formatCents(total, context.currency)}</span>
@@ -367,12 +396,13 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
       <Section number={7} title="Certification & updates">
         <div className="space-y-4">
           <label className="flex gap-3 rounded-2xl bg-neutral-gray p-4">
-            <Checkbox {...register("certification_accepted")} className="mt-0.5" aria-invalid={!!errors.certification_accepted} />
+            <Checkbox id="certification_accepted" {...register("certification_accepted")} className="mt-0.5" aria-required="true"
+              aria-invalid={errors.certification_accepted ? true : undefined} aria-describedby={errors.certification_accepted ? "certification_accepted-error" : undefined} />
             <span className="text-[15px] leading-relaxed">
-              I certify that the information provided in this request is accurate and that the requested purchase is for authorized church/ministry purposes.
+              I certify that the information provided in this request is accurate and that the requested purchase is for authorized church/ministry purposes.<RequiredMark />
             </span>
           </label>
-          <FieldError message={errors.certification_accepted?.message} />
+          <FieldError id="certification_accepted-error" message={errors.certification_accepted?.message} />
           <Field label="Your name" htmlFor="certification_name" required error={errors.certification_name?.message}
             hint={`Recorded with the date and time of submission (${formatDateTime(new Date().toISOString(), context.timezone)}). This is a record of your certification, not a legally binding electronic signature.`}>
             <Input id="certification_name" autoComplete="name" {...register("certification_name")} aria-invalid={!!errors.certification_name} />
@@ -388,21 +418,16 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
 
       {submitError ? <Alert tone="error" title="Your request was not submitted">{submitError}</Alert> : null}
 
-      <Button type="submit" variant="primary" size="lg" className="h-14 w-full text-base" disabled={busy}>
-        {busy ? <Spinner /> : null}
-        {phase === "uploading" ? "Uploading receipts…" : phase === "submitting" ? "Submitting…" : "Submit requisition"}
-      </Button>
+      <LoadingButton type="submit" variant="primary" size="lg" className="h-14 w-full text-base" pending={busy}
+        pendingLabel={phase === "uploading" ? "Uploading receipts…" : "Submitting…"}>
+        Submit requisition
+      </LoadingButton>
     </form>
   );
 }
 
-function focusFirstError(errors: FieldErrors<RequisitionInput>) {
-  const first = Object.keys(errors)[0];
-  if (!first) return;
-  const el = document.getElementById(first) ?? document.querySelector<HTMLElement>(`[name^="${first}"]`);
-  el?.scrollIntoView({ behavior: "smooth", block: "center" });
-  el?.focus({ preventScroll: true });
-}
+/** A failure whose message is already safe and specific for the requester. */
+class SubmitFailure extends Error {}
 
 function Section({ number, title, children }: { number: number; title: string; children: React.ReactNode }) {
   return (

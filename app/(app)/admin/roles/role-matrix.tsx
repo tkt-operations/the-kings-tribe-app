@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/field";
+import { Field, Input } from "@/components/ui/field";
+import { useFieldErrors } from "@/components/ui/form-feedback";
+import { LoadingButton } from "@/components/ui/submit-button";
 import { useAction } from "@/components/ui/use-action";
+import { rules, validate } from "@/lib/validation/form";
 import { createRole, setRolePermission } from "./actions";
 
 interface Role { id: string; key: string; name: string }
@@ -14,6 +16,8 @@ interface Perm { key: string; group_name: string; description: string }
 export function RoleMatrix({ roles, permissions, grants }: { roles: Role[]; permissions: Perm[]; grants: Record<string, string[]> }) {
   const { pending, error, run } = useAction();
   const [name, setName] = useState("");
+  const formRef = useRef<HTMLFormElement>(null);
+  const fields = useFieldErrors();
   const groups = [...new Set(permissions.map((p) => p.group_name))];
   return (
     <div className="space-y-4">
@@ -28,21 +32,27 @@ export function RoleMatrix({ roles, permissions, grants }: { roles: Role[]; perm
           </thead>
           <tbody>
             {groups.map((g) => (
-              <Group key={g} name={g} perms={permissions.filter((p) => p.group_name === g)} roles={roles} grants={grants}
-                onToggle={(roleId, perm, granted) => run(() => setRolePermission(roleId, perm, granted))} />
+              <Group key={g} name={g} perms={permissions.filter((p) => p.group_name === g)} roles={roles} grants={grants} pending={pending}
+                onToggle={(roleId, perm, granted) => run(() => setRolePermission(roleId, perm, granted), { successMessage: granted ? "Permission granted successfully." : "Permission removed successfully." })} />
             ))}
           </tbody>
         </table>
       </div>
-      <form className="flex max-w-lg gap-2" onSubmit={(e) => { e.preventDefault(); run(() => createRole({ name }), () => setName("")); }}>
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="New role name (e.g. Campus Lead)" aria-label="New role name" />
-        <Button type="submit" disabled={!name.trim() || pending} className="h-12"><Plus className="size-4" aria-hidden /> Add role</Button>
+      <form ref={formRef} className="flex max-w-lg items-start gap-2" noValidate onSubmit={(e) => {
+        e.preventDefault();
+        if (!fields.check(validate({ new_role_name: [name, rules.required("Role name is required."), rules.minLength(2, "Use at least 2 characters.")] }), formRef.current)) return;
+        run(() => createRole({ name }), { successMessage: "Role created successfully.", onSuccess: () => setName("") });
+      }}>
+        <Field label="New role name" htmlFor="new_role_name" required error={fields.errors.new_role_name} className="min-w-0 flex-1">
+          <Input value={name} maxLength={60} onChange={(e) => { setName(e.target.value); fields.clear("new_role_name"); }} placeholder="e.g. Campus Lead" />
+        </Field>
+        <LoadingButton type="submit" pending={pending} className="mt-7 h-12" icon={<Plus className="size-4" aria-hidden />}>Add role</LoadingButton>
       </form>
     </div>
   );
 }
 
-function Group({ name, perms, roles, grants, onToggle }: { name: string; perms: Perm[]; roles: Role[]; grants: Record<string, string[]>; onToggle: (roleId: string, perm: string, granted: boolean) => void }) {
+function Group({ name, perms, roles, grants, pending, onToggle }: { name: string; perms: Perm[]; roles: Role[]; grants: Record<string, string[]>; pending: boolean; onToggle: (roleId: string, perm: string, granted: boolean) => void }) {
   return (
     <>
       <tr className="bg-neutral-gray/60"><th colSpan={roles.length + 1} scope="rowgroup" className="px-4 py-2 text-left text-xs font-bold uppercase tracking-[0.12em] text-navy/60">{name}</th></tr>
@@ -54,7 +64,7 @@ function Group({ name, perms, roles, grants, onToggle }: { name: string; perms: 
             const checked = isAdmin || (grants[r.id] ?? []).includes(p.key);
             return (
               <td key={r.id} className="px-3 py-2.5 text-center">
-                <input type="checkbox" className="size-5 accent-navy" checked={checked} disabled={isAdmin} aria-label={`${r.name}: ${p.description}`}
+                <input type="checkbox" className="size-5 accent-navy" checked={checked} disabled={isAdmin || pending} aria-label={`${r.name}: ${p.description}`}
                   onChange={(e) => onToggle(r.id, p.key, e.target.checked)} />
               </td>
             );

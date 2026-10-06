@@ -1,16 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Paperclip, Trash2, Upload } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { Field, Input, Select, Textarea } from "@/components/ui/field";
-import { Spinner } from "@/components/ui/submit-button";
+import { Field, FieldError, Input, RequiredMark, RequiredNote, Select, Textarea } from "@/components/ui/field";
+import { useFieldErrors } from "@/components/ui/form-feedback";
+import { LoadingButton } from "@/components/ui/submit-button";
+import { useToast } from "@/components/ui/toast";
 import { useAction } from "@/components/ui/use-action";
 import { checkReceiptFile, RECEIPT_ACCEPT, RECEIPT_MAX_FILES } from "@/lib/receipt-files";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { rules, validate } from "@/lib/validation/form";
 import { registerReceipt } from "./actions";
+
+const EMPTY_DETAILS = { vendor_name: "", purchase_date: "", total_amount: "", reference: "", notes: "" };
 
 /**
  * Uploads go straight from the browser to the PRIVATE receipts bucket under
@@ -18,27 +23,57 @@ import { registerReceipt } from "./actions";
  * The server then verifies each object and records the receipt.
  */
 export function ReceiptUploadDialog({ requisitionId, purchaseOrders }: { requisitionId: string; purchaseOrders: { id: string; po_number: string }[] }) {
+  const defaultPo = purchaseOrders.length === 1 ? purchaseOrders[0].id : "";
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
-  const [details, setDetails] = useState({ purchase_order_id: purchaseOrders.length === 1 ? purchaseOrders[0].id : "", vendor_name: "", purchase_date: "", total_amount: "", reference: "", notes: "" });
+  const [details, setDetails] = useState({ purchase_order_id: defaultPo, ...EMPTY_DETAILS });
   const [uploading, setUploading] = useState(false);
-  const { pending, error, run, setError } = useAction();
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const uploadInFlight = useRef(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const fields = useFieldErrors();
+  const toast = useToast();
+  const { pending, error, run } = useAction();
 
   function add(list: FileList | null) {
     if (!list) return;
     const next = [...files];
     for (const f of Array.from(list)) {
       const check = checkReceiptFile(f);
-      if (!check.ok) { setError(check.error); continue; }
-      if (next.length < RECEIPT_MAX_FILES) next.push(f);
+      if (!check.ok) {
+        fields.setErrors((prev) => ({ ...prev, rc_files: check.error }));
+        toast.error(check.error);
+        continue;
+      }
+      if (next.length >= RECEIPT_MAX_FILES) {
+        const message = `Attach at most ${RECEIPT_MAX_FILES} files.`;
+        fields.setErrors((prev) => ({ ...prev, rc_files: message }));
+        toast.error(message);
+        break;
+      }
+      next.push(f);
+      fields.clear("rc_files");
     }
     setFiles(next);
   }
 
+  function setDetail(key: keyof typeof details, id: string | null, value: string) {
+    setDetails({ ...details, [key]: value });
+    if (id) fields.clear(id);
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    if (!files.length) { setError("Choose at least one receipt file."); return; }
+    if (uploadInFlight.current || pending) return;
+    setUploadError(null);
+    const errors = validate({
+      rc_files: [files.length ? "ok" : "", rules.required("Choose at least one receipt file.")],
+      rc_date: [details.purchase_date, rules.date()],
+      rc_total: [details.total_amount, rules.money("Enter the receipt total like 24.99.")],
+    });
+    if (!fields.check(errors, formRef.current)) return;
+
+    uploadInFlight.current = true;
     setUploading(true);
     const uploaded: { path: string; original_filename: string }[] = [];
     try {
@@ -47,41 +82,55 @@ export function ReceiptUploadDialog({ requisitionId, purchaseOrders }: { requisi
         const check = checkReceiptFile(file);
         if (!check.ok) throw new Error(check.error);
         const path = `requisitions/${requisitionId}/${crypto.randomUUID()}.${check.ext}`;
-        const { error: uploadError } = await supabase.storage.from("receipts").upload(path, file, { contentType: check.mime, upsert: false });
-        if (uploadError) throw new Error(`Could not upload ${file.name}.`);
+        const { error: storageError } = await supabase.storage.from("receipts").upload(path, file, { contentType: check.mime, upsert: false });
+        if (storageError) throw new Error(`Receipt upload failed for ${file.name}. Please try again.`);
         uploaded.push({ path, original_filename: file.name.slice(0, 255) });
       }
     } catch (err) {
-      setUploading(false);
-      setError((err as Error).message);
+      const message = err instanceof Error && err.message ? err.message : "Receipt upload failed. Please try again.";
+      setUploadError(message);
+      toast.error(message);
       return;
+    } finally {
+      uploadInFlight.current = false;
+      setUploading(false);
     }
-    setUploading(false);
-    run(() => registerReceipt(requisitionId, { ...details, purchase_order_id: details.purchase_order_id || null, files: uploaded }), () => {
-      setOpen(false);
-      setFiles([]);
+    run(() => registerReceipt(requisitionId, { ...details, purchase_order_id: details.purchase_order_id || null, files: uploaded }), {
+      errorMessage: "Receipt upload failed. Please try again.",
+      onSuccess: () => {
+        setOpen(false);
+        setFiles([]);
+        setDetails({ purchase_order_id: defaultPo, ...EMPTY_DETAILS });
+      },
     });
   }
 
   const busy = uploading || pending;
+  const formError = uploadError ?? error;
   return (
     <>
       <Button variant="secondary" onClick={() => setOpen(true)}><Upload className="size-4" aria-hidden /> Upload receipt</Button>
       <Dialog open={open} onClose={() => setOpen(false)} title="Upload receipt" description="Receipts are stored privately. Uploading does not mark anything purchased — reconcile the receipt afterwards.">
-        <form className="space-y-4" onSubmit={submit}>
-          {error ? <Alert tone="error">{error}</Alert> : null}
-          <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-navy/20 p-5 text-center hover:border-navy/40">
-            <Upload className="size-6 text-navy/60" aria-hidden />
-            <span className="text-sm font-medium">Take a photo or choose files</span>
-            <span className="text-xs text-navy/55">PDF, JPEG, PNG or HEIC · 10 MB max each</span>
-            <input type="file" multiple accept={RECEIPT_ACCEPT} className="sr-only" onChange={(e) => { add(e.target.files); e.target.value = ""; }} />
-          </label>
+        <form ref={formRef} className="space-y-4" onSubmit={submit} noValidate aria-busy={busy || undefined}>
+          {formError ? <Alert tone="error">{formError}</Alert> : null}
+          <RequiredNote />
+          <div>
+            <p id="rc_files-label" className="mb-1.5 text-sm font-medium">Receipt files<RequiredMark /></p>
+            <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-navy/20 p-5 text-center hover:border-navy/40">
+              <Upload className="size-6 text-navy/60" aria-hidden />
+              <span className="text-sm font-medium">Take a photo or choose files</span>
+              <span className="text-xs text-navy/55">PDF, JPEG, PNG or HEIC · 10 MB max each · up to {RECEIPT_MAX_FILES}</span>
+              <input id="rc_files" type="file" multiple accept={RECEIPT_ACCEPT} className="sr-only" onChange={(e) => { add(e.target.files); e.target.value = ""; }}
+                aria-labelledby="rc_files-label" aria-required="true" aria-invalid={fields.errors.rc_files ? true : undefined} aria-describedby={fields.errors.rc_files ? "rc_files-error" : undefined} />
+            </label>
+            <FieldError id="rc_files-error" message={fields.errors.rc_files} />
+          </div>
           {files.length ? (
             <ul className="space-y-2">
               {files.map((f, i) => (
                 <li key={`${f.name}-${i}`} className="flex items-center justify-between gap-2 rounded-xl bg-neutral-gray px-3 py-2 text-sm">
                   <span className="flex min-w-0 items-center gap-2"><Paperclip className="size-4 shrink-0" aria-hidden /><span className="truncate">{f.name}</span></span>
-                  <button type="button" className="flex size-9 items-center justify-center rounded-lg hover:bg-navy/10" aria-label={`Remove ${f.name}`} onClick={() => setFiles(files.filter((_, j) => j !== i))}><Trash2 className="size-4" aria-hidden /></button>
+                  <button type="button" className="flex size-9 items-center justify-center rounded-lg hover:bg-navy/10" aria-label={`Remove ${f.name}`} disabled={busy} onClick={() => setFiles(files.filter((_, j) => j !== i))}><Trash2 className="size-4" aria-hidden /></button>
                 </li>
               ))}
             </ul>
@@ -89,21 +138,21 @@ export function ReceiptUploadDialog({ requisitionId, purchaseOrders }: { requisi
           <div className="grid gap-3 sm:grid-cols-2">
             {purchaseOrders.length ? (
               <Field label="Purchase Order" htmlFor="rc_po">
-                <Select id="rc_po" value={details.purchase_order_id} onChange={(e) => setDetails({ ...details, purchase_order_id: e.target.value })}>
+                <Select value={details.purchase_order_id} onChange={(e) => setDetail("purchase_order_id", null, e.target.value)}>
                   <option value="">None</option>
                   {purchaseOrders.map((p) => <option key={p.id} value={p.id}>{p.po_number}</option>)}
                 </Select>
               </Field>
             ) : null}
-            <Field label="Vendor" htmlFor="rc_vendor"><Input id="rc_vendor" value={details.vendor_name} onChange={(e) => setDetails({ ...details, vendor_name: e.target.value })} /></Field>
-            <Field label="Purchase date" htmlFor="rc_date"><Input id="rc_date" type="date" value={details.purchase_date} onChange={(e) => setDetails({ ...details, purchase_date: e.target.value })} /></Field>
-            <Field label="Receipt total" htmlFor="rc_total"><Input id="rc_total" inputMode="decimal" className="tabular" placeholder="0.00" value={details.total_amount} onChange={(e) => setDetails({ ...details, total_amount: e.target.value })} /></Field>
-            <Field label="Receipt / invoice #" htmlFor="rc_ref"><Input id="rc_ref" value={details.reference} onChange={(e) => setDetails({ ...details, reference: e.target.value })} /></Field>
+            <Field label="Vendor" htmlFor="rc_vendor"><Input value={details.vendor_name} maxLength={200} onChange={(e) => setDetail("vendor_name", null, e.target.value)} /></Field>
+            <Field label="Purchase date" htmlFor="rc_date" error={fields.errors.rc_date}><Input type="date" value={details.purchase_date} onChange={(e) => setDetail("purchase_date", "rc_date", e.target.value)} /></Field>
+            <Field label="Receipt total" htmlFor="rc_total" error={fields.errors.rc_total}><Input inputMode="decimal" className="tabular" placeholder="0.00" value={details.total_amount} onChange={(e) => setDetail("total_amount", "rc_total", e.target.value)} /></Field>
+            <Field label="Receipt / invoice #" htmlFor="rc_ref"><Input value={details.reference} maxLength={200} onChange={(e) => setDetail("reference", null, e.target.value)} /></Field>
           </div>
-          <Field label="Notes" htmlFor="rc_notes"><Textarea id="rc_notes" rows={2} value={details.notes} onChange={(e) => setDetails({ ...details, notes: e.target.value })} /></Field>
+          <Field label="Notes" htmlFor="rc_notes"><Textarea rows={2} value={details.notes} maxLength={2000} onChange={(e) => setDetail("notes", null, e.target.value)} /></Field>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="submit" disabled={busy || !files.length}>{busy ? <Spinner /> : null}{uploading ? "Uploading…" : pending ? "Saving…" : "Upload receipt"}</Button>
+            <LoadingButton type="submit" pending={busy} pendingLabel={uploading ? "Uploading…" : "Saving…"}>Upload receipt</LoadingButton>
           </div>
         </form>
       </Dialog>

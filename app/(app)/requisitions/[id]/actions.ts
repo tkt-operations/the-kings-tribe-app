@@ -61,9 +61,16 @@ export async function startReview(requisitionId: string) {
     const r = await rpc<{ previous_status: string; status: string }>("start_requisition_review", { p_requisition_id: uuid.parse(requisitionId) });
     notifyIfChanged(requisitionId, r.previous_status, r.status);
     refresh(requisitionId);
-    return { ok: true, data: undefined };
+    return { ok: true, data: undefined, message: "Review started successfully." };
   });
 }
+
+const REVIEW_MESSAGES = {
+  approve: "Requisition approved successfully.",
+  partial: "Requisition partially approved successfully.",
+  hold: "Requisition placed on hold successfully.",
+  reject: "Requisition rejected successfully.",
+} as const;
 
 const reviewSchema = z.object({
   decision: z.enum(["approve", "partial", "hold", "reject"]),
@@ -104,7 +111,7 @@ export async function reviewRequisition(requisitionId: string, input: z.input<ty
     });
     notifyIfChanged(requisitionId, r.previous_status, r.status, v.comment || null);
     refresh(requisitionId);
-    return { ok: true, data: undefined, message: "Review saved." };
+    return { ok: true, data: undefined, message: REVIEW_MESSAGES[v.decision] };
   });
 }
 
@@ -113,7 +120,7 @@ export async function assignReviewer(requisitionId: string, reviewerId: string |
     await assertPermission("requisitions.review");
     await rpc("assign_requisition_reviewer", { p_requisition_id: uuid.parse(requisitionId), p_reviewer_id: reviewerId ? uuid.parse(reviewerId) : null });
     refresh(requisitionId);
-    return { ok: true, data: undefined };
+    return { ok: true, data: undefined, message: reviewerId ? "Reviewer assigned successfully." : "Reviewer removed successfully." };
   });
 }
 
@@ -123,7 +130,7 @@ export async function addComment(requisitionId: string, body: string) {
     const b = z.string().trim().min(1, "Write a comment").max(4000).parse(body);
     await rpc("add_requisition_comment", { p_requisition_id: uuid.parse(requisitionId), p_body: b });
     refresh(requisitionId);
-    return { ok: true, data: undefined };
+    return { ok: true, data: undefined, message: "Comment added successfully." };
   });
 }
 
@@ -176,7 +183,7 @@ export async function issuePurchaseOrder(requisitionId: string, input: z.input<t
     const items = ((po?.purchase_order_items ?? []) as { description: string; quantity: string; line_total: string; line_number: number }[]).sort((a, b) => a.line_number - b.line_number);
     after(() => notifyPurchaseOrderIssued(requisitionId, { id: r.id, po_number: r.po_number, total: r.total, reply_token: po?.reply_token as string, items }, pdf));
     refresh(requisitionId);
-    return { ok: true, data: { poNumber: r.po_number }, message: warning ?? `Purchase Order ${r.po_number} issued and emailed to the requester.` };
+    return { ok: true, data: { poNumber: r.po_number }, message: warning ? `Purchase order ${r.po_number} created. ${warning}` : `Purchase order ${r.po_number} created successfully and emailed to the requester.` };
   });
 }
 
@@ -189,7 +196,7 @@ export async function regeneratePurchaseOrderPdf(purchaseOrderId: string) {
     const current = /-v(\d+)\.pdf$/.exec((po.pdf_path as string | null) ?? "");
     await storePdf(purchaseOrderId, po.pdf_path ? (current ? Number(current[1]) + 1 : 2) : 1);
     refresh(po.requisition_id as string);
-    return { ok: true, data: undefined, message: "PDF regenerated." };
+    return { ok: true, data: undefined, message: "Purchase order PDF generated successfully." };
   });
 }
 
@@ -198,7 +205,7 @@ export async function voidPurchaseOrder(requisitionId: string, purchaseOrderId: 
     await assertPermission("purchase_orders.issue");
     await rpc("void_purchase_order", { p_purchase_order_id: uuid.parse(purchaseOrderId), p_reason: z.string().trim().min(3, "Give a reason").max(500).parse(reason) });
     refresh(requisitionId);
-    return { ok: true, data: undefined };
+    return { ok: true, data: undefined, message: "Purchase order voided successfully." };
   });
 }
 
@@ -226,7 +233,7 @@ export async function recordVendorOrder(requisitionId: string, input: z.input<ty
     });
     notifyIfChanged(requisitionId, r.previous_status, r.status);
     refresh(requisitionId);
-    return { ok: true, data: undefined, message: "Order recorded." };
+    return { ok: true, data: undefined, message: "Vendor order recorded successfully." };
   });
 }
 
@@ -235,7 +242,7 @@ export async function cancelVendorOrder(requisitionId: string, orderId: string, 
     await assertPermission("orders.record");
     await rpc("cancel_vendor_order", { p_vendor_order_id: uuid.parse(orderId), p_reason: z.string().trim().min(3, "Give a reason").max(500).parse(reason) });
     refresh(requisitionId);
-    return { ok: true, data: undefined };
+    return { ok: true, data: undefined, message: "Vendor order cancelled successfully." };
   });
 }
 
@@ -266,7 +273,7 @@ export async function registerReceipt(requisitionId: string, input: z.input<type
     });
     after(() => notifyReceiptReceived(id, { source: "upload" }));
     refresh(id);
-    return { ok: true, data: undefined, message: "Receipt uploaded. It is waiting for reconciliation." };
+    return { ok: true, data: undefined, message: "Receipt uploaded successfully. It is waiting for reconciliation." };
   });
 }
 
@@ -292,7 +299,7 @@ export async function reconcileReceipt(requisitionId: string, receiptId: string,
     });
     notifyIfChanged(requisitionId, r.previous_status, r.status);
     refresh(requisitionId);
-    return { ok: true, data: undefined, message: r.status === "purchased" ? "Reconciled — all approved items are now accounted for." : "Receipt reconciled." };
+    return { ok: true, data: undefined, message: r.status === "purchased" ? "Receipt reconciled successfully. All approved items are now accounted for." : "Receipt reconciled successfully." };
   });
 }
 
@@ -301,7 +308,7 @@ export async function rejectReceipt(requisitionId: string, receiptId: string, re
     await assertPermission("receipts.reconcile");
     await rpc("reject_receipt", { p_receipt_id: uuid.parse(receiptId), p_reason: z.string().trim().min(3, "Give a reason").max(500).parse(reason) });
     refresh(requisitionId);
-    return { ok: true, data: undefined };
+    return { ok: true, data: undefined, message: "Receipt rejected successfully." };
   });
 }
 
@@ -315,7 +322,7 @@ export async function cancelRemaining(requisitionId: string, itemId: string, qty
     });
     notifyIfChanged(requisitionId, null, r.status === "purchased" ? "purchased" : null);
     refresh(requisitionId);
-    return { ok: true, data: undefined };
+    return { ok: true, data: undefined, message: "Remaining quantity cancelled successfully." };
   });
 }
 
@@ -343,7 +350,7 @@ export async function recordDisbursement(requisitionId: string, input: z.input<t
       p_notes: v.notes || null,
     });
     refresh(requisitionId);
-    return { ok: true, data: undefined, message: "Disbursement recorded." };
+    return { ok: true, data: undefined, message: "Disbursement recorded successfully." };
   });
 }
 
@@ -354,6 +361,6 @@ export async function closeRequisition(requisitionId: string, comment: string) {
     const r = await rpc<{ previous_status: string; status: string }>("close_requisition", { p_requisition_id: uuid.parse(requisitionId), p_comment: c || null });
     notifyIfChanged(requisitionId, r.previous_status, r.status, c || null);
     refresh(requisitionId);
-    return { ok: true, data: undefined };
+    return { ok: true, data: undefined, message: "Requisition closed successfully." };
   });
 }

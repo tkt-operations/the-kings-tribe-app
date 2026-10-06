@@ -44,7 +44,7 @@ export async function saveRequestType(id: string | null, input: z.input<typeof s
       if (error) throw new ActionError(friendlyDbError(error));
     }
     revalidatePath("/admin/request-types");
-    return { ok: true, data: undefined, message: "Request type saved." };
+    return { ok: true, data: undefined, message: "Request type saved successfully." };
   } catch (e) {
     if (e instanceof z.ZodError) return { ok: false, error: e.issues[0]?.message ?? "Invalid input" };
     return toActionError(e);

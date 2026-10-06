@@ -3,12 +3,32 @@
 import { useFormStatus } from "react-dom";
 import { Button, type ButtonProps } from "./button";
 
+/** Submit button for forms using a React form action (reads useFormStatus). */
 export function SubmitButton({ children, pendingLabel = "Saving…", ...props }: ButtonProps & { pendingLabel?: string }) {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" disabled={pending || props.disabled} aria-busy={pending} {...props}>
-      {pending ? <Spinner /> : null}
-      {pending ? pendingLabel : children}
+    <LoadingButton type="submit" pending={pending} pendingLabel={pendingLabel} {...props}>
+      {children}
+    </LoadingButton>
+  );
+}
+
+/**
+ * Button with a loading state: shows a spinner and pending label, is disabled
+ * and aria-busy while `pending`, and is restored automatically afterwards.
+ */
+export function LoadingButton({
+  children,
+  pending = false,
+  pendingLabel,
+  icon,
+  disabled,
+  ...props
+}: ButtonProps & { pending?: boolean; pendingLabel?: string; icon?: React.ReactNode }) {
+  return (
+    <Button disabled={pending || disabled} aria-busy={pending || undefined} aria-disabled={pending || disabled || undefined} {...props}>
+      {pending ? <Spinner /> : icon}
+      {pending && pendingLabel ? pendingLabel : children}
     </Button>
   );
 }

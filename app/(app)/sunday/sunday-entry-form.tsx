@@ -2,15 +2,17 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { CalendarDays, Check, MessageSquarePlus, Users, Wallet } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { Input, Label } from "@/components/ui/field";
-import { Spinner } from "@/components/ui/submit-button";
+import { Field, FieldError, Input, RequiredNote } from "@/components/ui/field";
+import { focusFirstInvalidSoon, REVIEW_FIELDS_MESSAGE } from "@/components/ui/form-feedback";
+import { LoadingButton } from "@/components/ui/submit-button";
+import { useToast } from "@/components/ui/toast";
+import { useAction } from "@/components/ui/use-action";
 import { formatDate } from "@/lib/dates";
 import { formatCents, parseMoney } from "@/lib/money";
 import { saveSundayEntry } from "./actions";
@@ -53,8 +55,11 @@ export function SundayEntryForm(props: {
   canManageCategories: boolean;
 }) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const toast = useToast();
+  const formRef = useRef<HTMLFormElement>(null);
+  const { pending, run } = useAction();
   const [result, setResult] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [serviceNameError, setServiceNameError] = useState<string | null>(null);
   const [openNotes, setOpenNotes] = useState<Set<string>>(() => new Set(props.financeRows.filter((r) => r.notes).map((r) => r.key)));
   const [serviceName, setServiceName] = useState(props.serviceName);
 
@@ -86,31 +91,44 @@ export function SundayEntryForm(props: {
     router.push(`/sunday?${params.toString()}`);
   }
 
-  const onSubmit = handleSubmit((values) => {
+  const save = (values: FormValues) => {
+    if (!serviceName.trim()) {
+      setServiceNameError("Service name is required.");
+      toast.error(REVIEW_FIELDS_MESSAGE);
+      focusFirstInvalidSoon(formRef.current);
+      return;
+    }
     setResult(null);
-    startTransition(async () => {
-      const response = await saveSundayEntry({
-        service_date: props.serviceDate,
-        service_name: props.serviceName,
-        attendance: props.canAttendance ? values.attendance : undefined,
-        finance: props.canFinance ? values.finance : undefined,
-      });
-      if (response.ok) {
-        setResult({ tone: "success", text: `Saved. ${response.message ?? ""}` });
-        router.refresh();
-      } else {
-        setResult({ tone: "error", text: response.error });
-      }
-    });
-  });
+    run(
+      () =>
+        saveSundayEntry({
+          service_date: props.serviceDate,
+          service_name: props.serviceName,
+          attendance: props.canAttendance ? values.attendance : undefined,
+          finance: props.canFinance ? values.finance : undefined,
+        }),
+      {
+        successMessage: "Sunday report saved successfully.",
+        errorMessage: "Unable to save the Sunday report. Please try again.",
+        onSuccess: () => setResult({ tone: "success", text: "Sunday report saved successfully." }),
+        onError: (error) => setResult({ tone: "error", text: error }),
+      },
+    );
+  };
+
+  const onSubmit = (event: React.FormEvent<HTMLFormElement>) =>
+    handleSubmit(save, () => {
+      toast.error(REVIEW_FIELDS_MESSAGE);
+      focusFirstInvalidSoon(formRef.current);
+    })(event);
 
   return (
-    <form onSubmit={onSubmit} noValidate>
+    <form ref={formRef} onSubmit={onSubmit} noValidate aria-busy={pending || undefined}>
+      <RequiredNote className="mb-3 px-1" />
       {/* Service selector */}
       <Card className="mb-6">
         <CardBody className="grid gap-4 pt-5 sm:grid-cols-[1fr_1fr_auto] sm:items-end sm:pt-6">
-          <div>
-            <Label htmlFor="service_date">Service date</Label>
+          <Field label="Service date" htmlFor="service_date" required>
             <div className="relative">
               <Input
                 id="service_date"
@@ -122,14 +140,13 @@ export function SundayEntryForm(props: {
               />
               <CalendarDays className="pointer-events-none absolute left-3.5 top-3.5 size-5 text-navy/50" aria-hidden />
             </div>
-          </div>
-          <div>
-            <Label htmlFor="service_name">Service</Label>
+          </Field>
+          <Field label="Service" htmlFor="service_name" required error={serviceNameError}>
             <Input
               id="service_name"
               value={serviceName}
               maxLength={80}
-              onChange={(e) => setServiceName(e.target.value)}
+              onChange={(e) => { setServiceName(e.target.value); setServiceNameError(null); }}
               onBlur={() => serviceName.trim() && serviceName.trim() !== props.serviceName && navigate(props.serviceDate, serviceName.trim())}
               list="service-names"
             />
@@ -137,7 +154,7 @@ export function SundayEntryForm(props: {
               <option value="Sunday Service" />
               <option value="Special Service" />
             </datalist>
-          </div>
+          </Field>
           <div className="flex items-center gap-2 sm:pb-3">
             {props.isExisting ? <Badge tone="info">Editing saved entry</Badge> : <Badge>New entry</Badge>}
           </div>
@@ -155,8 +172,11 @@ export function SundayEntryForm(props: {
             />
             <CardBody className="space-y-3">
               {props.attendanceRows.length === 0 ? <p className="text-sm text-navy/60">No attendance categories are active.</p> : null}
-              {props.attendanceRows.map((row, i) => (
-                <div key={row.categoryId} className="flex items-center justify-between gap-4">
+              {props.attendanceRows.map((row, i) => {
+                const countError = formState.errors.attendance?.[i]?.count?.message;
+                return (
+                <div key={row.categoryId}>
+                <div className="flex items-center justify-between gap-4">
                   <label htmlFor={`att-${row.categoryId}`} className="min-w-0 flex-1 text-[15px] font-medium">
                     {row.name}
                     {row.archived ? <span className="ml-2 text-xs text-navy/50">(archived)</span> : null}
@@ -169,12 +189,16 @@ export function SundayEntryForm(props: {
                     autoComplete="off"
                     placeholder="0"
                     className="tabular text-right text-lg"
-                    {...register(`attendance.${i}.count`, { pattern: { value: /^\d{0,7}$/, message: "Whole numbers only" } })}
-                    aria-invalid={Boolean(formState.errors.attendance?.[i]?.count)}
+                    {...register(`attendance.${i}.count`, { pattern: { value: /^\s*\d{0,7}\s*$/, message: `Enter a whole number for ${row.name}.` } })}
+                    aria-invalid={countError ? true : undefined}
+                    aria-describedby={countError ? `att-${row.categoryId}-error` : undefined}
                   />
                   </div>
                 </div>
-              ))}
+                <FieldError id={`att-${row.categoryId}-error`} message={countError} className="justify-end" />
+                </div>
+                );
+              })}
               <div className="mt-2 flex items-center justify-between rounded-2xl bg-navy px-4 py-3 text-white">
                 <span className="text-sm font-medium text-white/75">Total attendance</span>
                 <span className="tabular font-serif text-3xl text-gold">{attendanceTotal.toLocaleString()}</span>
@@ -220,12 +244,15 @@ export function SundayEntryForm(props: {
                           autoComplete="off"
                           placeholder="0.00"
                           className="tabular pl-7 text-right text-lg"
-                          aria-invalid={invalid}
-                          {...register(`finance.${i}.amount`)}
+                          aria-invalid={invalid ? true : undefined}
+                          aria-describedby={invalid ? `fin-${row.key}-error` : undefined}
+                          {...register(`finance.${i}.amount`, {
+                            validate: (value) => value.trim() === "" || parseMoney(value, { allowNegative: row.allowsNegative }) !== null || "invalid",
+                          })}
                         />
                       </div>
                     </div>
-                    {invalid ? <p className="mt-1 text-right text-[13px] font-medium">Enter an amount like 125.50{row.allowsNegative ? " or -10.00" : ""}</p> : null}
+                    <FieldError id={`fin-${row.key}-error`} className="justify-end" message={invalid ? `Enter an amount like 125.50${row.allowsNegative ? " or -10.00" : ""}.` : null} />
                     {openNotes.has(row.key) ? (
                       <Input placeholder="Note (optional)" maxLength={1000} className="mt-2 h-11" {...register(`finance.${i}.notes`)} aria-label={`Note for ${row.label}`} />
                     ) : null}
@@ -254,10 +281,9 @@ export function SundayEntryForm(props: {
               <span className="text-navy/60">Totals are recalculated by the server when you save.</span>
             )}
           </div>
-          <Button type="submit" variant="gold" size="lg" disabled={pending} className="w-full sm:w-auto">
-            {pending ? <Spinner /> : null}
-            {pending ? "Saving…" : "Save Sunday entry"}
-          </Button>
+          <LoadingButton type="submit" variant="gold" size="lg" pending={pending} pendingLabel="Saving…" className="w-full sm:w-auto">
+            Save Sunday entry
+          </LoadingButton>
         </div>
       </div>
       {result?.tone === "error" ? <Alert tone="error" className="mt-4">{result.text}</Alert> : null}

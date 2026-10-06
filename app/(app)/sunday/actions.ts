@@ -60,7 +60,7 @@ export async function saveSundayEntry(input: SundayInput): Promise<ActionResult<
     revalidatePath("/sunday");
     revalidatePath("/dashboard");
     const r = result as { attendance_total: number; finance_total: string };
-    return { ok: true, data: { attendanceTotal: Number(r.attendance_total), financeTotal: r.finance_total }, message: "Sunday entry saved." };
+    return { ok: true, data: { attendanceTotal: Number(r.attendance_total), financeTotal: r.finance_total }, message: "Sunday report saved successfully." };
   } catch (error) {
     return toActionError(error);
   }

@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ClipboardCheck } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { Field, Input, Select, Textarea } from "@/components/ui/field";
-import { Spinner } from "@/components/ui/submit-button";
+import { Field, Input, RequiredMark, RequiredNote, Select, Textarea } from "@/components/ui/field";
+import { useFieldErrors } from "@/components/ui/form-feedback";
+import { LoadingButton } from "@/components/ui/submit-button";
 import { useAction } from "@/components/ui/use-action";
+import { rules, validate, type Check } from "@/lib/validation/form";
 import { cn } from "@/lib/cn";
 import { formatCents, lineTotal, parseMoney, parseQuantity, sumCents } from "@/lib/money";
 import { reviewRequisition } from "./actions";
@@ -46,7 +48,10 @@ export function ReviewDialog(props: {
       comment: "",
     })),
   );
-  const { pending, error, run, setError } = useAction();
+  const { pending, error, run } = useAction();
+  const formRef = useRef<HTMLFormElement>(null);
+  const fields = useFieldErrors();
+  const commentRequired = decision === "hold" || decision === "reject";
 
   const effective = lines.map((l) => (decision === "approve" ? { ...l, decision: "approved" as LineDecision } : l));
   const approvedTotal =
@@ -64,14 +69,29 @@ export function ReviewDialog(props: {
 
   function update(index: number, patch: Partial<(typeof lines)[number]>) {
     setLines((prev) => prev.map((l, i) => (i === index ? { ...l, ...patch } : l)));
+    for (const key of Object.keys(patch)) fields.clear(`rv_${key}_${index}`);
+  }
+
+  function validateReview() {
+    const spec: Record<string, [string, ...Check[]]> = {
+      review_comment: [comment, ...(commentRequired ? [rules.required("A comment is required when holding or rejecting.")] : [])],
+    };
+    if (decision === "approve" || decision === "partial") {
+      effective.forEach((line, i) => {
+        if (line.decision === "approved") {
+          spec[`rv_approved_quantity_${i}`] = [line.approved_quantity, rules.required("Enter the approved quantity."), rules.quantity()];
+          spec[`rv_approved_unit_price_${i}`] = [line.approved_unit_price, rules.money()];
+        } else {
+          spec[`rv_comment_${i}`] = [line.comment || comment, rules.required("Give a reason for holding or rejecting this line, or add a comment below.")];
+        }
+      });
+    }
+    return validate(spec);
   }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if ((decision === "hold" || decision === "reject") && !comment.trim()) {
-      setError("A comment is required when holding or rejecting.");
-      return;
-    }
+    if (!fields.check(validateReview(), formRef.current)) return;
     run(
       () =>
         reviewRequisition(props.requisitionId, {
@@ -81,7 +101,7 @@ export function ReviewDialog(props: {
           expense_category_id: expenseCategory || null,
           items: decision === "hold" || decision === "reject" ? [] : effective,
         }),
-      () => setOpen(false),
+      { errorMessage: "Unable to save the review decision. Please try again.", onSuccess: () => setOpen(false) },
     );
   }
 
@@ -93,14 +113,15 @@ export function ReviewDialog(props: {
         <ClipboardCheck className="size-4" aria-hidden /> Review
       </Button>
       <Dialog open={open} onClose={() => setOpen(false)} title="Finance review" description="Decide on the request and each line. The requester is notified of the outcome." wide>
-        <form onSubmit={submit} className="space-y-5">
+        <form ref={formRef} onSubmit={submit} className="space-y-5" noValidate>
           {error ? <Alert tone="error">{error}</Alert> : null}
-          <fieldset>
-            <legend className="mb-2 text-sm font-medium">Decision</legend>
+          <RequiredNote />
+          <fieldset role="radiogroup" aria-required="true">
+            <legend className="mb-2 text-sm font-medium">Decision<RequiredMark /></legend>
             <div className="grid gap-2 sm:grid-cols-4">
               {DECISIONS.map((d) => (
                 <label key={d.key} className={cn("cursor-pointer rounded-2xl border p-3 text-sm", decision === d.key ? "border-navy bg-navy text-white" : "border-navy/15 hover:border-navy/30")}>
-                  <input type="radio" name="decision" value={d.key} checked={decision === d.key} onChange={() => setDecision(d.key)} className="sr-only" />
+                  <input type="radio" name="decision" value={d.key} checked={decision === d.key} onChange={() => { setDecision(d.key); fields.setErrors({}); }} className="sr-only" />
                   <span className={cn("block font-bold", decision === d.key && "text-gold")}>{d.label}</span>
                   <span className={cn("mt-0.5 block text-[13px]", decision === d.key ? "text-white/75" : "text-navy/60")}>{d.help}</span>
                 </label>
@@ -119,19 +140,26 @@ export function ReviewDialog(props: {
                       <p className="font-medium">{item.line}. {item.description}</p>
                       <p className="tabular text-sm text-navy/60">Requested {item.quantity.replace(/\.00$/, "")} × {formatCents(parseMoney(item.estimatedUnitPrice) ?? 0n, props.currency)}</p>
                     </div>
-                    <div className="mt-2 grid gap-2 sm:grid-cols-[10rem_7rem_9rem_1fr]">
-                      <Select aria-label={`Decision for line ${item.line}`} value={line.decision} disabled={decision === "approve"}
-                        onChange={(e) => update(index, { decision: e.target.value as LineDecision })}>
-                        <option value="approved">Approve</option>
-                        <option value="held">Hold</option>
-                        <option value="rejected">Reject</option>
-                      </Select>
-                      <Input aria-label={`Approved quantity for line ${item.line}`} inputMode="decimal" className="tabular" value={line.approved_quantity}
-                        disabled={line.decision !== "approved"} onChange={(e) => update(index, { approved_quantity: e.target.value })} />
-                      <Input aria-label={`Approved unit price for line ${item.line}`} inputMode="decimal" className="tabular" value={line.approved_unit_price}
-                        disabled={line.decision !== "approved"} onChange={(e) => update(index, { approved_unit_price: e.target.value })} />
-                      <Input aria-label={`Comment for line ${item.line}`} placeholder={needsComment ? "Reason (required)" : "Comment (optional)"} value={line.comment}
-                        onChange={(e) => update(index, { comment: e.target.value })} aria-invalid={needsComment && !line.comment && !comment} />
+                    <div className="mt-2 grid items-start gap-2 sm:grid-cols-[10rem_7rem_9rem_1fr]">
+                      <Field label={<>Decision <span className="sr-only">for line {item.line}</span></>} htmlFor={`rv_decision_${index}`}>
+                        <Select value={line.decision} disabled={decision === "approve"}
+                          onChange={(e) => update(index, { decision: e.target.value as LineDecision })}>
+                          <option value="approved">Approve</option>
+                          <option value="held">Hold</option>
+                          <option value="rejected">Reject</option>
+                        </Select>
+                      </Field>
+                      <Field label={<>Approved qty <span className="sr-only">for line {item.line}</span></>} htmlFor={`rv_approved_quantity_${index}`} required={line.decision === "approved"} error={fields.errors[`rv_approved_quantity_${index}`]}>
+                        <Input inputMode="decimal" className="tabular" value={line.approved_quantity}
+                          disabled={line.decision !== "approved"} onChange={(e) => update(index, { approved_quantity: e.target.value })} />
+                      </Field>
+                      <Field label={<>Unit price <span className="sr-only">for line {item.line}</span></>} htmlFor={`rv_approved_unit_price_${index}`} error={fields.errors[`rv_approved_unit_price_${index}`]}>
+                        <Input inputMode="decimal" className="tabular" value={line.approved_unit_price}
+                          disabled={line.decision !== "approved"} onChange={(e) => update(index, { approved_unit_price: e.target.value })} />
+                      </Field>
+                      <Field label={<>{needsComment ? "Reason" : "Comment (optional)"} <span className="sr-only">for line {item.line}</span></>} htmlFor={`rv_comment_${index}`} required={needsComment && !comment.trim()} error={fields.errors[`rv_comment_${index}`]}>
+                        <Input value={line.comment} maxLength={1000} onChange={(e) => update(index, { comment: e.target.value })} />
+                      </Field>
                     </div>
                   </div>
                 );
@@ -154,15 +182,15 @@ export function ReviewDialog(props: {
             </Field>
           </div>
 
-          <Field label={decision === "hold" || decision === "reject" ? "Comment for the requester (required)" : "Comment for the requester (optional)"} htmlFor="review_comment">
-            <Textarea id="review_comment" rows={3} value={comment} onChange={(e) => setComment(e.target.value)} maxLength={2000} />
+          <Field label={commentRequired ? "Comment for the requester" : "Comment for the requester (optional)"} htmlFor="review_comment" required={commentRequired} error={fields.errors.review_comment}>
+            <Textarea rows={3} value={comment} onChange={(e) => { setComment(e.target.value); fields.clear("review_comment"); }} maxLength={2000} />
           </Field>
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-navy/10 pt-4">
             <p className="text-sm">Approved total <span className="tabular ml-2 font-serif text-2xl">{formatCents(approvedTotal, props.currency)}</span></p>
             <div className="flex gap-2">
               <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={pending}>{pending ? <Spinner /> : null}Save decision</Button>
+              <LoadingButton type="submit" pending={pending} pendingLabel="Saving…">Save decision</LoadingButton>
             </div>
           </div>
         </form>

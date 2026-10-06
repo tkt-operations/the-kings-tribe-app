@@ -37,6 +37,8 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
 export function friendlyDbError(error: PostgrestLikeError | null | undefined): string {
   if (!error) return "Something went wrong. Please try again.";
   if (error.code === "P0001" && error.message) return error.message;
+  // Diagnostics stay on the server; the person only sees the friendly text below.
+  console.error("Database error", { code: error.code, message: error.message, details: error.details, hint: error.hint });
   if (error.code === "42501") return "You do not have permission to do that.";
   if (error.code === "23505" || error.code === "23514" || error.code === "23503") {
     for (const [constraint, message] of Object.entries(CONSTRAINT_MESSAGES)) {
@@ -53,4 +55,17 @@ export function toActionError(error: unknown): { ok: false; error: string; field
   if (error instanceof ActionError) return { ok: false, error: error.message, fieldErrors: error.fieldErrors };
   console.error(error);
   return { ok: false, error: "Something went wrong. Please try again." };
+}
+
+/**
+ * Map validation issues to { fieldName: message } (first message per field),
+ * so forms can show each error next to its control.
+ */
+export function issuesToFieldErrors(issues: readonly { path: readonly PropertyKey[]; message: string }[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const issue of issues) {
+    const key = issue.path.map(String).join(".");
+    if (key && !(key in out)) out[key] = issue.message;
+  }
+  return out;
 }

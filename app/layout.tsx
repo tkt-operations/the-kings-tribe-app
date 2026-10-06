@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { dmSerif, satoshi } from "./fonts";
 import { ServiceWorkerRegistration } from "@/components/pwa/service-worker-registration";
+import { ToastProvider } from "@/components/ui/toast";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -40,7 +41,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en" className={`${satoshi.variable} ${dmSerif.variable}`}>
       <body className="min-h-dvh">
-        {children}
+        <ToastProvider>{children}</ToastProvider>
         <ServiceWorkerRegistration />
       </body>
     </html>

@@ -102,6 +102,54 @@ input[type="number"]::-webkit-outer-spin-button {
   outline-offset: 2px;
 }
 
+/* Toast notifications (components/ui/toast.tsx). The viewport is a manual
+   popover so it renders above modal dialogs; reset the UA popover styles. */
+.toast-viewport {
+  position: fixed;
+  inset: auto;
+  top: calc(var(--safe-top) + 0.75rem);
+  left: calc(var(--safe-left) + 1rem);
+  right: calc(var(--safe-right) + 1rem);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  overflow: visible;
+  pointer-events: none;
+}
+
+@media (min-width: 640px) {
+  .toast-viewport {
+    top: calc(var(--safe-top) + 1rem);
+    left: auto;
+    width: 24rem;
+  }
+}
+
+.toast-item {
+  animation: toast-in 180ms ease-out;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -1,21 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Alert } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { Field, Input, Select, Textarea } from "@/components/ui/field";
-import { Spinner } from "@/components/ui/submit-button";
+import { Field, Input, RequiredNote, Select, Textarea } from "@/components/ui/field";
+import { useFieldErrors } from "@/components/ui/form-feedback";
+import { LoadingButton } from "@/components/ui/submit-button";
 import { useAction } from "@/components/ui/use-action";
+import { issuesToFieldErrors } from "@/lib/action-result";
 import type { ChurchSettings } from "@/lib/data/settings";
+import { settingsSchema } from "@/lib/validation/settings";
 import { saveSettings } from "./actions";
+
+type Section = "church" | "money" | "notifications" | "policy";
+
+const SECTION_FIELDS: Record<Section, string[]> = {
+  church: ["church_name", "address_line1", "address_line2", "city", "region", "postal_code", "country", "phone", "email", "website"],
+  money: ["currency_code", "timezone"],
+  notifications: ["finance_notification_email"],
+  policy: ["requisition_policy", "po_instructions", "po_footer"],
+};
 
 const CURRENCIES = ["USD", "CAD", "GBP", "EUR", "NGN", "GHS", "KES", "ZAR", "AUD", "NZD"];
 
 export function SettingsForm({ settings, timezones, sections = ["church", "money", "notifications", "policy"] }: {
   settings: ChurchSettings;
   timezones: string[];
-  sections?: ("church" | "money" | "notifications" | "policy")[];
+  sections?: Section[];
 }) {
   const [v, setV] = useState({
     church_name: settings.church_name ?? "",
@@ -35,26 +46,49 @@ export function SettingsForm({ settings, timezones, sections = ["church", "money
     po_instructions: settings.po_instructions ?? "",
     po_footer: settings.po_footer ?? "",
   });
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const { pending, error, message, run } = useAction();
-  const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setV({ ...v, [k]: e.target.value });
-  const err = (k: string) => fieldErrors[k];
+  const formRef = useRef<HTMLFormElement>(null);
+  const fields = useFieldErrors();
+  const [hiddenError, setHiddenError] = useState<string | null>(null);
+  const { pending, error, run } = useAction();
+  const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    setV({ ...v, [k]: e.target.value });
+    fields.clear(k);
+  };
+  const err = (k: string) => fields.errors[k];
+  const visible = new Set(sections.flatMap((s) => SECTION_FIELDS[s]));
+
+  /** Errors for fields on this screen go inline; others (another wizard step) become a form-level message. */
+  function showErrors(all: Record<string, string>) {
+    const inline = Object.fromEntries(Object.entries(all).filter(([k]) => visible.has(k)));
+    const elsewhere = Object.entries(all).filter(([k]) => !visible.has(k));
+    setHiddenError(elsewhere.length ? `Another settings section needs attention: ${elsewhere[0][1]}` : null);
+    return inline;
+  }
 
   return (
     <form
       className="space-y-6"
+      ref={formRef}
+      noValidate
       onSubmit={(e) => {
         e.preventDefault();
-        setFieldErrors({});
-        run(async () => {
-          const r = await saveSettings(v);
-          if (!r.ok && r.fieldErrors) setFieldErrors(r.fieldErrors);
-          return r;
+        const parsed = settingsSchema.safeParse(v);
+        if (!parsed.success) {
+          const all = issuesToFieldErrors(parsed.error.issues);
+          const inline = showErrors(all);
+          if (Object.keys(inline).length) fields.check(inline, formRef.current);
+          return;
+        }
+        setHiddenError(null);
+        run(() => saveSettings(v), {
+          successMessage: "Settings saved successfully.",
+          onError: (_e, fe) => fields.show(fe ? showErrors(fe) : undefined, formRef.current),
         });
       }}
     >
       {error ? <Alert tone="error">{error}</Alert> : null}
-      {message ? <Alert tone="success">{message}</Alert> : null}
+      {hiddenError ? <Alert tone="error">{hiddenError}</Alert> : null}
+      <RequiredNote />
 
       {sections.includes("church") ? (
         <Card>
@@ -78,12 +112,12 @@ export function SettingsForm({ settings, timezones, sections = ["church", "money
         <Card>
           <CardHeader title="Currency & timezone" description="The timezone decides what “today” and “this Sunday” mean." />
           <CardBody className="grid gap-4 sm:grid-cols-2">
-            <Field label="Currency" htmlFor="currency_code" error={err("currency_code")}>
+            <Field label="Currency" htmlFor="currency_code" required error={err("currency_code")}>
               <Select id="currency_code" value={v.currency_code} onChange={set("currency_code")}>
                 {[...new Set([v.currency_code, ...CURRENCIES])].map((c) => <option key={c} value={c}>{c}</option>)}
               </Select>
             </Field>
-            <Field label="Timezone" htmlFor="timezone" error={err("timezone")}>
+            <Field label="Timezone" htmlFor="timezone" required error={err("timezone")}>
               <Select id="timezone" value={v.timezone} onChange={set("timezone")}>
                 {timezones.map((t) => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
               </Select>
@@ -107,15 +141,15 @@ export function SettingsForm({ settings, timezones, sections = ["church", "money
         <Card>
           <CardHeader title="Policies" description="Shown to requesters and printed on Purchase Orders." />
           <CardBody className="space-y-4">
-            <Field label="Requisition policy" htmlFor="requisition_policy" error={err("requisition_policy")}><Textarea id="requisition_policy" rows={3} value={v.requisition_policy} onChange={set("requisition_policy")} /></Field>
-            <Field label="Purchase Order instructions" htmlFor="po_instructions" error={err("po_instructions")}><Textarea id="po_instructions" rows={3} value={v.po_instructions} onChange={set("po_instructions")} /></Field>
-            <Field label="Purchase Order policy / footer" htmlFor="po_footer" error={err("po_footer")}><Textarea id="po_footer" rows={2} value={v.po_footer} onChange={set("po_footer")} /></Field>
+            <Field label="Requisition policy" htmlFor="requisition_policy" required error={err("requisition_policy")}><Textarea id="requisition_policy" rows={3} value={v.requisition_policy} onChange={set("requisition_policy")} /></Field>
+            <Field label="Purchase Order instructions" htmlFor="po_instructions" required error={err("po_instructions")}><Textarea id="po_instructions" rows={3} value={v.po_instructions} onChange={set("po_instructions")} /></Field>
+            <Field label="Purchase Order policy / footer" htmlFor="po_footer" required error={err("po_footer")}><Textarea id="po_footer" rows={2} value={v.po_footer} onChange={set("po_footer")} /></Field>
           </CardBody>
         </Card>
       ) : null}
 
       <div className="flex justify-end">
-        <Button type="submit" variant="gold" size="lg" disabled={pending}>{pending ? <Spinner /> : null}Save settings</Button>
+        <LoadingButton type="submit" variant="gold" size="lg" pending={pending} pendingLabel="Saving…">Save settings</LoadingButton>
       </div>
     </form>
   );

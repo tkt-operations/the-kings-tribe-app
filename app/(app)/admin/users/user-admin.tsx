@@ -1,14 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Copy, UserPlus } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { Checkbox, Field, Input } from "@/components/ui/field";
-import { Spinner } from "@/components/ui/submit-button";
+import { Checkbox, Field, FieldError, Input, RequiredMark, RequiredNote } from "@/components/ui/field";
+import { useFieldErrors } from "@/components/ui/form-feedback";
+import { LoadingButton } from "@/components/ui/submit-button";
+import { useToast } from "@/components/ui/toast";
 import { useAction } from "@/components/ui/use-action";
+import { rules, validate } from "@/lib/validation/form";
 import { inviteUser, setUserActive, setUserRole } from "./actions";
 
 interface Role { id: string; key: string; name: string; description: string | null }
@@ -34,7 +37,8 @@ export function UserAdmin({ users, roles, currentUserId }: { users: UserRow[]; r
                 </div>
               </div>
               {u.id !== currentUserId ? (
-                <Button size="sm" variant={u.is_active ? "danger" : "secondary"} className="h-10" onClick={() => run(() => setUserActive(u.id, !u.is_active))}>
+                <Button size="sm" variant={u.is_active ? "danger" : "secondary"} className="h-10" disabled={pending}
+                  onClick={() => run(() => setUserActive(u.id, !u.is_active), { successMessage: u.is_active ? `${u.full_name || u.email} deactivated successfully.` : `${u.full_name || u.email} reactivated successfully.` })}>
                   {u.is_active ? "Deactivate" : "Reactivate"}
                 </Button>
               ) : null}
@@ -46,7 +50,11 @@ export function UserAdmin({ users, roles, currentUserId }: { users: UserRow[]; r
                   const checked = u.roleIds.includes(r.id);
                   return (
                     <label key={r.id} className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-xl px-3 text-sm ring-1 ${checked ? "bg-navy text-white ring-navy" : "ring-navy/15 hover:bg-navy/5"}`}>
-                      <input type="checkbox" className="size-4 accent-gold" checked={checked} onChange={(e) => run(() => setUserRole(u.id, r.id, e.target.checked))} />
+                      <input type="checkbox" className="size-4 accent-gold" checked={checked} disabled={pending}
+                        onChange={(e) => {
+                          const granted = e.target.checked;
+                          run(() => setUserRole(u.id, r.id, granted), { successMessage: granted ? `${r.name} role added successfully.` : `${r.name} role removed successfully.` });
+                        }} />
                       {r.name}
                     </label>
                   );
@@ -64,32 +72,59 @@ function InviteDialog({ roles }: { roles: Role[] }) {
   const [open, setOpen] = useState(false);
   const [v, setV] = useState({ email: "", full_name: "", role_ids: [] as string[], delivery: "email" as "email" | "link" });
   const [link, setLink] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const fields = useFieldErrors();
+  const toast = useToast();
   const { pending, error, message, run } = useAction();
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const errors = validate({
+      inv_name: [v.full_name, rules.required("Full name is required."), rules.minLength(2, "Enter the person's full name.")],
+      inv_email: [v.email, rules.required("Email address is required."), rules.email()],
+      inv_roles: [v.role_ids.length ? "ok" : "", rules.required("Choose at least one role.")],
+    });
+    if (!fields.check(errors, formRef.current)) return;
+    run(() => inviteUser(v), {
+      successMessage: "Invitation sent successfully.",
+      errorMessage: "Unable to invite this person. Please try again.",
+      onSuccess: (data) => { if (data?.link) setLink(data.link); else setOpen(false); },
+    });
+  }
   return (
     <>
-      <Button variant="gold" onClick={() => { setOpen(true); setLink(null); }}><UserPlus className="size-4" aria-hidden /> Invite user</Button>
+      <Button variant="gold" onClick={() => { setOpen(true); setLink(null); setV({ email: "", full_name: "", role_ids: [], delivery: "email" }); fields.setErrors({}); }}><UserPlus className="size-4" aria-hidden /> Invite user</Button>
       <Dialog open={open} onClose={() => setOpen(false)} title="Invite a team member" description="They will choose their own password. Department leads do not need accounts — send them a requisition link instead.">
         {link ? (
           <div className="space-y-4">
             <Alert tone="success" title="Invitation link created">{message}</Alert>
             <Input readOnly value={link} onFocus={(e) => e.target.select()} aria-label="Invitation link" />
-            <Button onClick={() => navigator.clipboard?.writeText(link)}><Copy className="size-4" aria-hidden /> Copy link</Button>
+            <Button onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(link);
+                toast.success("Invitation link copied to the clipboard.");
+              } catch {
+                toast.error("Unable to copy automatically. Select the link and copy it manually.");
+              }
+            }}><Copy className="size-4" aria-hidden /> Copy link</Button>
           </div>
         ) : (
-          <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); run(() => inviteUser(v), (data) => { if (data?.link) setLink(data.link); else setOpen(false); }); }}>
+          <form ref={formRef} className="space-y-4" onSubmit={submit} noValidate>
             {error ? <Alert tone="error">{error}</Alert> : null}
-            <Field label="Full name" htmlFor="inv_name"><Input id="inv_name" value={v.full_name} onChange={(e) => setV({ ...v, full_name: e.target.value })} required /></Field>
-            <Field label="Email" htmlFor="inv_email"><Input id="inv_email" type="email" inputMode="email" autoCapitalize="none" value={v.email} onChange={(e) => setV({ ...v, email: e.target.value })} required /></Field>
-            <fieldset>
-              <legend className="mb-2 text-sm font-medium">Roles</legend>
+            <RequiredNote />
+            <Field label="Full name" htmlFor="inv_name" required error={fields.errors.inv_name}><Input value={v.full_name} maxLength={120} onChange={(e) => { setV({ ...v, full_name: e.target.value }); fields.clear("inv_name"); }} /></Field>
+            <Field label="Email address" htmlFor="inv_email" required error={fields.errors.inv_email}><Input type="email" inputMode="email" autoCapitalize="none" value={v.email} onChange={(e) => { setV({ ...v, email: e.target.value }); fields.clear("inv_email"); }} /></Field>
+            <fieldset id="inv_roles" data-invalid={fields.errors.inv_roles ? true : undefined} aria-describedby={fields.errors.inv_roles ? "inv_roles-error" : undefined}>
+              <legend className="mb-2 text-sm font-medium">Roles<RequiredMark /><span className="sr-only"> (choose at least one; required)</span></legend>
               <div className="space-y-2">
                 {roles.map((r) => (
                   <label key={r.id} className="flex gap-3 rounded-xl p-2 hover:bg-navy/5">
-                    <Checkbox checked={v.role_ids.includes(r.id)} onChange={(e) => setV({ ...v, role_ids: e.target.checked ? [...v.role_ids, r.id] : v.role_ids.filter((x) => x !== r.id) })} className="mt-0.5" />
+                    <Checkbox checked={v.role_ids.includes(r.id)} onChange={(e) => { setV({ ...v, role_ids: e.target.checked ? [...v.role_ids, r.id] : v.role_ids.filter((x) => x !== r.id) }); fields.clear("inv_roles"); }} className="mt-0.5" />
                     <span><span className="block font-medium">{r.name}</span>{r.description ? <span className="block text-sm text-navy/60">{r.description}</span> : null}</span>
                   </label>
                 ))}
               </div>
+              <FieldError id="inv_roles-error" message={fields.errors.inv_roles} />
             </fieldset>
             <fieldset>
               <legend className="mb-2 text-sm font-medium">How should they receive it?</legend>
@@ -98,7 +133,7 @@ function InviteDialog({ roles }: { roles: Role[] }) {
             </fieldset>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={pending}>{pending ? <Spinner /> : null}Invite</Button>
+              <LoadingButton type="submit" pending={pending} pendingLabel="Inviting…">Invite</LoadingButton>
             </div>
           </form>
         )}
