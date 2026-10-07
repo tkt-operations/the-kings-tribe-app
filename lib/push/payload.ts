@@ -48,3 +48,11 @@ export function buildPushPayload(n: { notificationId: string; type: string; impo
     badge: Number.isInteger(n.unread) && n.unread >= 0 ? Math.min(n.unread, 999) : 0,
   };
 }
+
+// TEMPORARY (administrator Web Push self-test; remove with app/(app)/notifications/push-test-actions.ts).
+export const TEST_PUSH_BODY = "Notification test — tap to open requisition";
+
+/** Fixed test payload: only the requisition id varies. No badge change. */
+export function buildTestPushPayload(requisitionId: string, tag: string): Omit<PushPayload, "badge"> {
+  return { title: PUSH_TITLE, body: TEST_PUSH_BODY, url: safeNotificationLink(`/requisitions/${requisitionId}`), tag };
+}

@@ -8,6 +8,7 @@ import { cn } from "@/lib/cn";
 import { publicEnv } from "@/lib/env";
 import { deviceLabel, pushSupport, sameServerKey, urlBase64ToUint8Array } from "@/lib/push/client";
 import { getPushStatus, removePushDevice, removePushSubscription, savePushSubscription, setPushLevel, type PushStatus } from "@/app/(app)/notifications/push-actions";
+import { listTestPushTargets, sendTestPush, type TestPushTarget } from "@/app/(app)/notifications/push-test-actions";
 
 /**
  * "Phone notifications" for the signed-in user. Permission is requested ONLY
@@ -34,7 +35,7 @@ async function readyRegistration(timeoutMs = 4000): Promise<ServiceWorkerRegistr
   return Promise.race([navigator.serviceWorker.ready, new Promise<null>((r) => setTimeout(() => r(null), timeoutMs))]);
 }
 
-export function PushSettings() {
+export function PushSettings({ selfTest = false }: { selfTest?: boolean } = {}) {
   const toast = useToast();
   const publicKey = publicEnv().vapidPublicKey;
   const [phase, setPhase] = useState<PushPhase>("checking");
@@ -139,6 +140,7 @@ export function PushSettings() {
   }
 
   const devices = status?.devices ?? [];
+  const showSelfTest = selfTest && Boolean(status?.configured) && devices.length > 0;
   return (
     <section aria-labelledby="push-settings-title" className="mb-5 rounded-[var(--radius-card)] bg-white p-4 ring-1 ring-navy/10">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -227,6 +229,75 @@ export function PushSettings() {
           </div>
         </div>
       ) : null}
+
+      {showSelfTest ? <PushSelfTest /> : null}
     </section>
+  );
+}
+
+/**
+ * TEMPORARY — administrator-only Web Push self-test (deep-link check). Sends one
+ * fixed alert to the administrator's own phone(s), opening a requisition chosen
+ * from their own recent list. Remove with app/(app)/notifications/push-test-actions.ts.
+ */
+function PushSelfTest() {
+  const toast = useToast();
+  const [targets, setTargets] = useState<TestPushTarget[] | null>(null);
+  const [selected, setSelected] = useState("");
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listTestPushTargets().then((r) => {
+      if (!cancelled) setTargets(r.ok ? r.data : []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function send() {
+    if (!selected || sending) return;
+    setSending(true);
+    setResult(null);
+    try {
+      const r = await sendTestPush(selected);
+      if (r.ok) {
+        setResult(r.message ?? "Test notification sent.");
+        toast.success(r.message ?? "Test notification sent.");
+      } else {
+        setResult(r.error);
+        toast.error(r.error);
+      }
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="mt-4 rounded-xl border border-dashed border-gold bg-gold/[0.08] p-3" data-testid="push-self-test">
+      <p className="text-sm font-bold">Send test notification <span className="font-normal text-navy/60">(temporary, administrators only)</span></p>
+      <p className="mt-0.5 text-[13px] text-navy/65">Sends one generic alert to your own phone. Tapping it should open the requisition you choose. Nothing else is created or emailed.</p>
+      <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+        <label className="sr-only" htmlFor="push-self-test-requisition">Requisition to open</label>
+        <select
+          id="push-self-test-requisition"
+          value={selected}
+          onChange={(e) => setSelected(e.target.value)}
+          disabled={targets === null || sending}
+          className="h-12 min-w-0 flex-1 rounded-xl border border-navy/15 bg-white px-3 text-sm"
+        >
+          <option value="">{targets === null ? "Loading requisitions…" : "Choose a requisition to open"}</option>
+          {(targets ?? []).map((t) => (
+            <option key={t.id} value={t.id}>{t.requisition_number}</option>
+          ))}
+        </select>
+        <LoadingButton type="button" variant="secondary" className="h-12 w-full sm:w-auto" pending={sending} pendingLabel="Sending…" disabled={!selected} onClick={() => void send()}>
+          Send test notification
+        </LoadingButton>
+      </div>
+      {result ? <p className="mt-2 text-[13px] font-medium" role="status">{result}</p> : null}
+    </div>
   );
 }

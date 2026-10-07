@@ -267,6 +267,26 @@ describe("dispatch: claim and record (service role only)", () => {
   });
 });
 
+describe("TEMPORARY administrator self-test result recording", () => {
+  it("records subscription health only: no dispatch, inbox, email, workflow or audit rows", async () => {
+    const ep = endpoint("web.push.apple.com");
+    await save(u.admin, ep);
+    const sub = await one<{ id: string }>(db, "select id from public.push_subscriptions where endpoint = $1", [ep]);
+    const counts = () => one<Record<string, number>>(db, `select
+      (select count(*) from public.push_dispatches)::int dispatches, (select count(*) from public.user_notifications)::int inbox,
+      (select count(*) from public.notifications)::int emails, (select count(*) from public.requisition_status_history)::int history,
+      (select count(*) from public.requisitions)::int requisitions, (select count(*) from public.receipts)::int receipts,
+      (select count(*) from public.purchase_orders)::int pos, (select count(*) from public.vendor_orders)::int vendor_orders,
+      (select count(*) from public.audit_logs)::int audit`);
+    const before = await counts();
+    await record([{ notification_id: null, subscription_id: sub.id, outcome: "sent" }]);
+    expect(await counts()).toEqual(before);
+    const after = await one<{ last_success_at: string | null; failure_count: number }>(db, "select last_success_at, failure_count from public.push_subscriptions where id = $1", [sub.id]);
+    expect(after.last_success_at).not.toBeNull();
+    expect(after.failure_count).toBe(0);
+  });
+});
+
 describe("Release 1 and other features are unaffected", () => {
   it("inbox rows, RLS and email tables behave exactly as before", async () => {
     const before = await one<{ n: number }>(db, "select count(*)::int as n from public.notifications");
