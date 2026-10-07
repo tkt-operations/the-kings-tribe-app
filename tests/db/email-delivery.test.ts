@@ -94,21 +94,6 @@ describe("recording provider events", () => {
   });
 });
 
-describe("TEMPORARY administrator email delivery self-test row", () => {
-  it("a requisition-less test email is matched by the webhook like any other, with no workflow side effects", async () => {
-    const count = async () => (await one<{ c: string }>(db, `select (select count(*) from public.requisitions) || '/' || (select count(*) from public.requisition_status_history) || '/' ||
-      (select count(*) from public.user_notifications) || '/' || (select count(*) from public.push_dispatches) || '/' || (select count(*) from public.audit_logs) as c`)).c;
-    const before = await count();
-    const id = (await one<{ id: string }>(db,
-      "insert into public.notifications (requisition_id, channel, template, recipient, subject, status, provider_message_id) values (null, 'email', 'delivery_self_test', 'admin@example.org', 'The Kings Tribe — Email Delivery Test', 'sent', 'msg-self-test') returning id")).id;
-    expect(await record("st_1", "msg-self-test", "sent", "2026-10-07T23:00:01Z")).toMatchObject({ result: "recorded", delivery_status: "sent" });
-    expect(await record("st_2", "msg-self-test", "delivered", "2026-10-07T23:00:04Z")).toMatchObject({ result: "recorded", delivery_status: "delivered" });
-    expect(await record("st_2", "msg-self-test", "delivered", "2026-10-07T23:00:04Z")).toMatchObject({ result: "duplicate" });
-    expect(await state(id)).toMatchObject({ delivery_status: "delivered", delivery_status_at: expect.stringContaining("23:00:04"), last: expect.stringContaining("23:00:04"), events: 2 });
-    expect(await count()).toBe(before);
-  });
-});
-
 describe("security", () => {
   it("only the trusted server role can record events", async () => {
     const user = await createUser(db, "admin-de@example.org", ["administrator"]);
