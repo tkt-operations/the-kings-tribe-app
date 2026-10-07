@@ -6,6 +6,7 @@ import { useState } from "react";
 import { LogOut, MoreHorizontal, X } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { cn } from "@/lib/cn";
+import { BellButton, NotificationPanel, useNotificationBell } from "@/components/notifications/notification-bell";
 import type { NavItem } from "./nav-config";
 import { NavIcon } from "./nav-icon";
 
@@ -19,8 +20,19 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
-export function AppShell({ nav, user, children }: { nav: NavItem[]; user: ShellUser; children: React.ReactNode }) {
+export function AppShell({
+  nav,
+  user,
+  notifications,
+  children,
+}: {
+  nav: NavItem[];
+  user: ShellUser;
+  notifications: { userId: string; unread: number; timeZone?: string };
+  children: React.ReactNode;
+}) {
   const pathname = usePathname();
+  const bell = useNotificationBell(notifications.userId, notifications.unread);
   const [moreOpen, setMoreOpen] = useState(false);
   const primary = nav.filter((n) => n.mobilePrimary).slice(0, 3);
   const overflow = nav.filter((n) => !primary.includes(n));
@@ -30,9 +42,12 @@ export function AppShell({ nav, user, children }: { nav: NavItem[]; user: ShellU
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 flex-col bg-navy text-white lg:flex">
         <div className="px-7 pb-8 pt-8">
-          <Link href="/dashboard" aria-label="The Kings Tribe — Dashboard">
-            <Logo variant="landscape-gold-on-navy" height={46} />
-          </Link>
+          <div className="flex items-start justify-between gap-2">
+            <Link href="/dashboard" aria-label="The Kings Tribe — Dashboard">
+              <Logo variant="landscape-gold-on-navy" height={46} />
+            </Link>
+            <BellButton bell={bell} className="-mr-3" />
+          </div>
           <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.18em] text-white/45">Finance &amp; Operations</p>
         </div>
         <nav aria-label="Main" className="flex-1 space-y-0.5 overflow-y-auto px-4">
@@ -69,12 +84,17 @@ export function AppShell({ nav, user, children }: { nav: NavItem[]; user: ShellU
         <Link href="/dashboard" aria-label="The Kings Tribe — Dashboard">
           <Logo variant="landscape-gold-on-navy" height={32} />
         </Link>
-        <form action="/auth/signout" method="post">
-          <button type="submit" className="flex size-11 items-center justify-center rounded-xl text-white/80 hover:bg-white/10" aria-label="Sign out">
-            <LogOut className="size-5" aria-hidden />
-          </button>
-        </form>
+        <div className="flex items-center gap-1">
+          <BellButton bell={bell} />
+          <form action="/auth/signout" method="post">
+            <button type="submit" className="flex size-11 items-center justify-center rounded-xl text-white/80 hover:bg-white/10" aria-label="Sign out">
+              <LogOut className="size-5" aria-hidden />
+            </button>
+          </form>
+        </div>
       </header>
+
+      <NotificationPanel bell={bell} timeZone={notifications.timeZone} />
 
       <main
         className="mx-auto w-full max-w-7xl px-4 pb-32 pt-6 sm:px-6 lg:px-10 lg:pb-16 lg:pt-10"

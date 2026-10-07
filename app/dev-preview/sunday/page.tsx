@@ -7,7 +7,7 @@ import { devOnly } from "../guard";
 export default function PreviewSunday() {
   devOnly();
   return (
-    <AppShell nav={NAV_ITEMS} user={{ fullName: "Avery Finance", email: "avery@example.org", roleNames: ["Head of Finance"] }}>
+    <AppShell nav={NAV_ITEMS} user={{ fullName: "Avery Finance", email: "avery@example.org", roleNames: ["Head of Finance"] }} notifications={{ userId: "00000000-0000-4000-8000-000000000000", unread: 3 }}>
       <PageHeader eyebrow="Sunday reporting" title="Sunday Entry" description="Record attendance and finance received for a service. Totals are calculated automatically and every change is audited." />
       <SundayEntryForm
         serviceDate="2026-10-04" serviceName="Sunday Service" maxDate="2026-10-06" currency="USD" canAttendance canFinance isExisting canManageCategories

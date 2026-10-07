@@ -124,6 +124,13 @@ Request types are rows in a table, not code. Each type uses one of five workflow
 4. Attachments are stored privately and a **pending** receipt is queued for Finance to reconcile.
 5. Emails that can't be matched appear under **Receipts → Unmatched** for manual assignment.
 
+### In-app notifications
+- Internal users have an operational inbox: the **bell** in the app shell and the **/notifications** page. It is separate from the email log (`notifications` table), which keeps recording emails sent.
+- Inbox rows (`user_notifications`) are created **only by database triggers** on workflow tables, in the same transaction as the change. Recipients come from the permission tables, never from role names. External requesters keep receiving email only.
+- Each user reads only their own rows, and only while they still hold the permission a row requires. Read state changes through `mark_notification_read` / `mark_all_notifications_read`.
+- The dashboard's **Needs attention** cards are live workflow state (`my_needs_attention()`), not notification history.
+- See [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md) for the event catalog, routing and actor rules. Web Push is not part of Release 1.
+
 ## Branding
 
 | Element | What the app uses |

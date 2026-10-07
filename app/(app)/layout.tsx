@@ -4,6 +4,7 @@ import { visibleNav } from "@/components/shell/nav-config";
 import { Alert } from "@/components/ui/alert";
 import { requireUser } from "@/lib/auth";
 import { getChurchSettings } from "@/lib/data/settings";
+import { getUnreadCount } from "@/lib/notifications/queries";
 
 const ROLE_NAMES: Record<string, string> = {
   administrator: "Administrator",
@@ -15,7 +16,7 @@ const ROLE_NAMES: Record<string, string> = {
 
 export default async function InternalLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
-  const settings = await getChurchSettings();
+  const [settings, unread] = await Promise.all([getChurchSettings(), getUnreadCount()]);
   const nav = visibleNav(user.permissions);
   const needsSetup = !settings?.setup_completed_at && user.permissions.has("settings.manage");
 
@@ -23,6 +24,7 @@ export default async function InternalLayout({ children }: { children: React.Rea
     <AppShell
       nav={nav}
       user={{ fullName: user.fullName, email: user.email, roleNames: user.roles.map((r) => ROLE_NAMES[r] ?? r) }}
+      notifications={{ userId: user.id, unread, timeZone: settings?.timezone ?? undefined }}
     >
       {needsSetup ? (
         <Alert tone="warning" title="Finish setting up the church" className="mb-6">

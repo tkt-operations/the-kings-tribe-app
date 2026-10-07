@@ -11,6 +11,8 @@ import { addDays, formatDate, isIsoDate, startOfMonth, startOfYear, todayInTimez
 import { centsToChartNumber, formatCents, numericToCents } from "@/lib/money";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { STATUS_LABELS, isRequisitionStatus, type RequisitionStatus } from "@/lib/workflow/status";
+import { NeedsAttention } from "@/components/dashboard/needs-attention";
+import { getNeedsAttention } from "@/lib/notifications/queries";
 import { DashboardCharts } from "./dashboard-charts";
 import { DateRangeFilter } from "./date-range-filter";
 
@@ -38,7 +40,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
   const canRequisitions = user.permissions.has("requisitions.view");
 
   const supabase = await createSupabaseServerClient();
-  const [totals, reqs] = await Promise.all([
+  const [totals, reqs, attention] = await Promise.all([
     canAttendance || canFinance
       ? supabase.rpc("service_category_totals", { p_from: queryFrom, p_to: to })
       : Promise.resolve({ data: [] as ServiceTotalRow[] }),
@@ -49,6 +51,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
           .gte("submitted_at", `${from}T00:00:00Z`)
           .lte("submitted_at", `${addDays(to, 1)}T00:00:00Z`)
       : Promise.resolve({ data: [] }),
+    getNeedsAttention(),
   ]);
 
   const summary = summarizeServices((totals.data ?? []) as ServiceTotalRow[]);
@@ -107,6 +110,8 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
           ) : null
         }
       />
+
+      <NeedsAttention cards={attention} />
 
       <DateRangeFilter from={from} to={to} today={today} />
 

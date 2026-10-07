@@ -12,6 +12,7 @@ import { isPriority, PRIORITIES, PRIORITY_LABELS } from "@/lib/priority";
 import { sanitizeSearch } from "@/lib/search";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { REQUISITION_STATUSES, STATUS_LABELS, isRequisitionStatus } from "@/lib/workflow/status";
+import { ATTENTION_LABELS, isRequisitionAttentionCard } from "@/lib/notifications/attention";
 
 export const metadata = { title: "Requisitions" };
 
@@ -37,10 +38,17 @@ export default async function RequisitionsPage({ searchParams }: PageProps<"/req
   const requester = sanitizeSearch(str("requester"));
   const priority = isPriority(str("priority")) ? str("priority") : "";
   const sort = str("sort") === "priority" ? "priority" : "newest";
+  // Needs Attention card filter: the same live workflow rule as the dashboard card (database function).
+  const attention = isRequisitionAttentionCard(str("attention")) ? str("attention") : "";
   const page = Math.max(1, Math.min(1000, Number(str("page")) || 1));
   const uuid = /^[0-9a-f-]{36}$/i;
 
   const supabase = await createSupabaseServerClient();
+  let attentionIds: string[] | null = null;
+  if (attention) {
+    const { data: idRows } = await supabase.rpc("needs_attention_requisition_ids", { p_card: attention });
+    attentionIds = ((idRows ?? []) as unknown[]).map((r) => (typeof r === "string" ? r : String((r as Record<string, unknown>).needs_attention_requisition_ids ?? ""))).filter((id) => uuid.test(id));
+  }
   let query = supabase
     .from("requisitions")
     .select(
@@ -51,6 +59,7 @@ export default async function RequisitionsPage({ searchParams }: PageProps<"/req
   if (sort === "priority") query = query.order("highest_item_priority", { ascending: true, nullsFirst: false });
   query = query.order("submitted_at", { ascending: false }).range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
   if (priority) query = query.eq("highest_item_priority", priority);
+  if (attentionIds) query = attentionIds.length ? query.in("id", attentionIds) : query.eq("id", "00000000-0000-0000-0000-000000000000");
   if (status === "open") query = query.not("status", "in", "(closed,rejected)");
   else if (isRequisitionStatus(status)) query = query.eq("status", status);
   if (uuid.test(department)) query = query.eq("department_id", department);
@@ -71,7 +80,7 @@ export default async function RequisitionsPage({ searchParams }: PageProps<"/req
   const pages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
   const qs = (overrides: Record<string, string | number>) => {
     const sp = new URLSearchParams();
-    for (const [k, v] of Object.entries({ q, status, department, type, from, to, requester, priority, sort: sort === "newest" ? "" : sort, page, ...overrides })) if (v) sp.set(k, String(v));
+    for (const [k, v] of Object.entries({ q, status, department, type, from, to, requester, priority, attention, sort: sort === "newest" ? "" : sort, page, ...overrides })) if (v) sp.set(k, String(v));
     return `/requisitions?${sp.toString()}`;
   };
 
@@ -84,7 +93,19 @@ export default async function RequisitionsPage({ searchParams }: PageProps<"/req
         actions={user.permissions.has("form_links.manage") ? <ButtonLink href="/admin/form-links" variant="secondary">Requisition links</ButtonLink> : null}
       />
 
+      {attention ? (
+        <p className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <span className="inline-flex min-h-9 items-center rounded-full bg-gold/25 px-3 font-medium text-navy">
+            Needs attention: {ATTENTION_LABELS[attention as keyof typeof ATTENTION_LABELS].title}
+          </span>
+          <Link href={qs({ attention: "", page: "" })} className="inline-flex min-h-11 items-center rounded-xl px-2 font-medium text-navy/70 underline-offset-2 hover:underline">
+            Show all requisitions
+          </Link>
+        </p>
+      ) : null}
+
       <form method="get" className="mb-6 grid gap-2 rounded-[var(--radius-card)] bg-white p-3 ring-1 ring-navy/10 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr_1fr_auto]">
+        {attention ? <input type="hidden" name="attention" value={attention} /> : null}
         <div className="relative">
           <Search className="pointer-events-none absolute left-3.5 top-3.5 size-5 text-navy/40" aria-hidden />
           <Input name="q" defaultValue={q} placeholder="Search number, requester, purpose…" className="pl-11" aria-label="Search" type="search" />

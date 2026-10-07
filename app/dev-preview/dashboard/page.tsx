@@ -13,7 +13,7 @@ export default function PreviewDashboard() {
   devOnly();
   const att = weeks.map((date, i) => ({ date, a1: 120 + ((i * 37) % 29) + i * 2, a2: 31 + ((i * 13) % 11) }));
   return (
-    <AppShell nav={NAV_ITEMS} user={{ fullName: "Avery Finance", email: "avery@example.org", roleNames: ["Head of Finance"] }}>
+    <AppShell nav={NAV_ITEMS} user={{ fullName: "Avery Finance", email: "avery@example.org", roleNames: ["Head of Finance"] }} notifications={{ userId: "00000000-0000-4000-8000-000000000000", unread: 3 }}>
       <PageHeader eyebrow="Latest service · Sunday, October 4, 2026" title="Good morning, Avery" actions={<ButtonLink href="#" variant="gold">Enter this Sunday</ButtonLink>} />
       <DateRangeFilter from="2026-07-14" to="2026-10-05" today="2026-10-05" />
       <section className="mb-8 grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
