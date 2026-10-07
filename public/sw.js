@@ -110,24 +110,65 @@ self.addEventListener("push", (event) => {
   );
 });
 
+// Sent to an open app window when the worker cannot navigate it itself; the app
+// routes to the same allowlisted path (components/pwa/service-worker-registration.tsx).
+const NAVIGATE_MESSAGE = "tkt:navigate";
+
+async function focusClient(client) {
+  try {
+    if (client && typeof client.focus === "function") await client.focus();
+  } catch {
+    // Focus can be refused; the notification tap already brings the app forward on most platforms.
+  }
+}
+
+// Tapping a notification must end on its exact in-app path (already allowlisted):
+//  - a window already showing that path is just focused;
+//  - otherwise an open app window is navigated there and focused, or, where the
+//    browser cannot navigate it (iOS PWAs, windows not controlled by this
+//    worker), told to route itself there;
+//  - with no open window, a new one is opened at that path.
+async function openFromNotification(path) {
+  const target = new URL(path, self.location.origin).href;
+  const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  const ours = windows.filter((client) => {
+    try {
+      return new URL(client.url).origin === self.location.origin;
+    } catch {
+      return false;
+    }
+  });
+  const exact = ours.find((client) => client.url.split("#")[0] === target);
+  if (exact) {
+    await focusClient(exact);
+    return;
+  }
+  const client = ours.find((c) => c.focused) || ours.find((c) => c.visibilityState === "visible") || ours[0];
+  if (client) {
+    let navigated = null;
+    if (typeof client.navigate === "function") {
+      try {
+        navigated = await client.navigate(target);
+      } catch {
+        navigated = null;
+      }
+    }
+    if (navigated) {
+      await focusClient(navigated);
+      return;
+    }
+    try {
+      client.postMessage({ type: NAVIGATE_MESSAGE, url: path });
+    } catch {
+      // Nothing else to try for this window.
+    }
+    await focusClient(client);
+    return;
+  }
+  if (self.clients.openWindow) await self.clients.openWindow(target);
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const target = new URL(safePath(event.notification.data && event.notification.data.url), self.location.origin).href;
-  event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (windows) => {
-      for (const client of windows) {
-        if (new URL(client.url).origin !== self.location.origin) continue;
-        const focused = typeof client.focus === "function" ? await client.focus() : client;
-        if (focused && typeof focused.navigate === "function") {
-          try {
-            await focused.navigate(target);
-          } catch {
-            // Navigation can be refused for uncontrolled clients; the app is focused anyway.
-          }
-        }
-        return;
-      }
-      if (self.clients.openWindow) await self.clients.openWindow(target);
-    }),
-  );
+  event.waitUntil(openFromNotification(safePath(event.notification.data && event.notification.data.url)));
 });

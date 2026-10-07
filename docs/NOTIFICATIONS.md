@@ -112,7 +112,11 @@ Nothing in this path can roll back or block the workflow, or change the inbox or
 ### Service worker (`public/sw.js`)
 - The existing caching is unchanged.
 - **`push`** shows a plain-text notification (title fixed, text capped at 120 characters) and sets the app badge where supported.
-- **`notificationclick`** opens only allowlisted in-app paths: `/requisitions/<uuid>`, `/receipts`, `/dashboard` or `/notifications`. Anything else becomes `/notifications`. It focuses an open app window and navigates it, or opens one.
+- **`notificationclick`** opens only allowlisted in-app paths: `/requisitions/<uuid>`, `/receipts`, `/dashboard` or `/notifications`. Anything else becomes `/notifications`. A tap always ends on that exact path:
+  - a window already showing it is just focused
+  - otherwise the open app window is navigated there, then focused
+  - where the browser can't navigate that window (for example an installed iPhone app, or a window the worker doesn't control), the worker sends it a `tkt:navigate` message with the allowlisted path, and the app routes itself there (`components/pwa/service-worker-registration.tsx` accepts only same-origin messages with allowlisted paths)
+  - with no window open, a new one opens at that path
 - Push payloads are not cached.
 - `pushsubscriptionchange` is not handled. A changed or expired subscription shows as "not on for this device", and the user turns it on again explicitly.
 

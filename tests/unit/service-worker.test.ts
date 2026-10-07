@@ -13,20 +13,31 @@ const SOURCE = readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8");
 const ORIGIN = "https://ops.thekingstribe.org";
 const REQ = "0b6f0f9e-1c2d-4e3f-8a9b-0c1d2e3f4a5b";
 
-function loadWorker(opts: { badge?: boolean; windows?: { url: string; navigate?: boolean }[] } = {}) {
+type WindowSpec = { url: string; navigate?: "ok" | "missing" | "rejects" | "null"; focused?: boolean; visibilityState?: string };
+
+function loadWorker(opts: { badge?: boolean; windows?: WindowSpec[] } = {}) {
   const listeners: Record<string, (event: unknown) => void> = {};
+  const calls: string[] = [];
   const showNotification = vi.fn(async () => {});
   const setAppBadge = vi.fn(async () => {});
   const clearAppBadge = vi.fn(async () => {});
   const windows = (opts.windows ?? []).map((w) => {
-    const client = {
-      url: w.url,
-      focus: vi.fn(async () => client),
-      navigate: w.navigate === false ? undefined : vi.fn(async () => client),
-    };
-    return client;
+    const client: Record<string, unknown> = { url: w.url, focused: Boolean(w.focused), visibilityState: w.visibilityState ?? "hidden" };
+    client.focus = vi.fn(async () => { calls.push(`focus ${String(client.url).replace(ORIGIN, "")}`); return client; });
+    client.postMessage = vi.fn((m: { type: string; url: string }) => calls.push(`postMessage ${m.type} ${m.url}`));
+    const mode = w.navigate ?? "ok";
+    if (mode !== "missing") {
+      client.navigate = vi.fn(async (u: string) => {
+        calls.push(`navigate ${u.replace(ORIGIN, "")}`);
+        if (mode === "rejects") throw new TypeError("not controlled");
+        if (mode === "null") return null;
+        client.url = u;
+        return client;
+      });
+    }
+    return client as { url: string; focus: ReturnType<typeof vi.fn>; navigate?: ReturnType<typeof vi.fn>; postMessage: ReturnType<typeof vi.fn> };
   });
-  const openWindow = vi.fn(async () => null);
+  const openWindow = vi.fn(async (u: string) => { calls.push(`openWindow ${u.replace(ORIGIN, "")}`); return null; });
   const self = {
     addEventListener: (type: string, fn: (event: unknown) => void) => { listeners[type] = fn; },
     registration: { showNotification },
@@ -41,7 +52,7 @@ function loadWorker(opts: { badge?: boolean; windows?: { url: string; navigate?:
     listeners[type]({ ...event, waitUntil: (p: Promise<unknown>) => { pending = p; } });
     await pending;
   };
-  return { listeners, run, showNotification, setAppBadge, clearAppBadge, windows, openWindow };
+  return { listeners, run, showNotification, setAppBadge, clearAppBadge, windows, openWindow, calls };
 }
 
 const pushEvent = (data: unknown) => ({ data: { json: () => (typeof data === "string" ? JSON.parse(data) : data) } });
@@ -97,38 +108,85 @@ describe("service worker: push", () => {
   });
 });
 
-describe("service worker: notification click", () => {
+describe("service worker: notification click opens the exact destination", () => {
   const click = (url: unknown) => ({ notification: { close: vi.fn(), data: { url } } });
+  const DETAIL = `/requisitions/${REQ}`;
 
-  it("focuses an existing app window and navigates it to the record", async () => {
-    const w = loadWorker({ windows: [{ url: "https://other.example.com/" }, { url: `${ORIGIN}/dashboard` }] });
-    const event = click(`/requisitions/${REQ}`);
+  it("1. existing PWA window on /requisitions → navigates it to the exact detail page, then focuses", async () => {
+    const w = loadWorker({ windows: [{ url: `${ORIGIN}/requisitions` }] });
+    const event = click(DETAIL);
     await w.run("notificationclick", event);
     expect(event.notification.close).toHaveBeenCalled();
-    expect(w.windows[0].focus).not.toHaveBeenCalled();
-    expect(w.windows[1].focus).toHaveBeenCalled();
-    expect(w.windows[1].navigate).toHaveBeenCalledWith(`${ORIGIN}/requisitions/${REQ}`);
+    expect(w.calls).toEqual([`navigate ${DETAIL}`, `focus ${DETAIL}`]);
     expect(w.openWindow).not.toHaveBeenCalled();
   });
 
-  it("opens the app when no window is open", async () => {
+  it("2. window already on the exact detail page → focus only, no navigation", async () => {
+    const w = loadWorker({ windows: [{ url: `${ORIGIN}${DETAIL}` }] });
+    await w.run("notificationclick", click(DETAIL));
+    expect(w.calls).toEqual([`focus ${DETAIL}`]);
+  });
+
+  it("3. no open window → opens the exact detail page", async () => {
     const w = loadWorker();
-    await w.run("notificationclick", click("/receipts"));
-    expect(w.openWindow).toHaveBeenCalledWith(`${ORIGIN}/receipts`);
+    await w.run("notificationclick", click(DETAIL));
+    expect(w.calls).toEqual([`openWindow ${DETAIL}`]);
   });
 
-  it("never opens an external or unsafe target", async () => {
-    for (const url of ["https://evil.example.com/", "//evil.example.com/x", "javascript:alert(1)", undefined]) {
-      const w = loadWorker();
-      await w.run("notificationclick", click(url));
-      expect(w.openWindow).toHaveBeenCalledWith(`${ORIGIN}/notifications`);
-    }
+  it("4. existing window on /dashboard → navigates to the exact detail page, then focuses", async () => {
+    const w = loadWorker({ windows: [{ url: `${ORIGIN}/dashboard` }] });
+    await w.run("notificationclick", click(DETAIL));
+    expect(w.calls).toEqual([`navigate ${DETAIL}`, `focus ${DETAIL}`]);
   });
 
-  it("focuses even when navigation is not possible", async () => {
-    const w = loadWorker({ windows: [{ url: `${ORIGIN}/dashboard`, navigate: false }] });
-    await w.run("notificationclick", click("/receipts"));
-    expect(w.windows[0].focus).toHaveBeenCalled();
+  it.each(["https://evil.example.com/", "//evil.example.com/x", "javascript:alert(1)", "data:text/html,x", "/requisitions/../admin", "/requisitions/not-a-uuid", undefined])(
+    "5. unsafe link %j → safe fallback /notifications",
+    async (url) => {
+      const open = loadWorker();
+      await open.run("notificationclick", click(url));
+      expect(open.calls).toEqual(["openWindow /notifications"]);
+      const existing = loadWorker({ windows: [{ url: `${ORIGIN}/requisitions` }] });
+      await existing.run("notificationclick", click(url));
+      expect(existing.calls).toEqual(["navigate /notifications", "focus /notifications"]);
+    },
+  );
+
+  it.each(["/receipts", "/notifications", "/dashboard"])("6–8. valid %s opens exactly that path", async (path) => {
+    const open = loadWorker();
+    await open.run("notificationclick", click(path));
+    expect(open.calls).toEqual([`openWindow ${path}`]);
+    const existing = loadWorker({ windows: [{ url: `${ORIGIN}${path === "/dashboard" ? "/receipts" : "/dashboard"}` }] });
+    await existing.run("notificationclick", click(path));
+    expect(existing.calls).toEqual([`navigate ${path}`, `focus ${path}`]);
+  });
+
+  it.each([
+    ["navigate() unavailable (iOS installed app)", "missing" as const],
+    ["navigate() refused (window not controlled by this worker)", "rejects" as const],
+    ["navigate() resolves null", "null" as const],
+  ])("when %s, the app is told to route itself to the exact path, then focused", async (_label, mode) => {
+    const w = loadWorker({ windows: [{ url: `${ORIGIN}/requisitions`, navigate: mode }] });
+    await w.run("notificationclick", click(DETAIL));
+    const expected = mode === "missing" ? [] : [`navigate ${DETAIL}`];
+    expect(w.calls).toEqual([...expected, `postMessage tkt:navigate ${DETAIL}`, "focus /requisitions"]);
     expect(w.openWindow).not.toHaveBeenCalled();
+  });
+
+  it("prefers the focused/visible app window and ignores other origins", async () => {
+    const w = loadWorker({ windows: [
+      { url: "https://other.example.com/" },
+      { url: `${ORIGIN}/receipts`, visibilityState: "hidden" },
+      { url: `${ORIGIN}/dashboard`, visibilityState: "visible" },
+    ] });
+    await w.run("notificationclick", click(DETAIL));
+    expect(w.calls).toEqual([`navigate ${DETAIL}`, `focus ${DETAIL}`]);
+    expect(w.windows[0].focus).not.toHaveBeenCalled();
+    expect(w.windows[1].navigate).not.toHaveBeenCalled();
+  });
+
+  it("the message carries only the allowlisted path (no external URL can be injected)", async () => {
+    const w = loadWorker({ windows: [{ url: `${ORIGIN}/requisitions`, navigate: "missing" }] });
+    await w.run("notificationclick", click("https://evil.example.com/steal"));
+    expect(w.windows[0].postMessage).toHaveBeenCalledWith({ type: "tkt:navigate", url: "/notifications" });
   });
 });
