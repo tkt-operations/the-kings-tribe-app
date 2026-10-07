@@ -42,6 +42,14 @@ export const lineItemSchema = z.object({
     .optional()
     .or(z.literal("")),
   notes: optionalText(2000),
+  // Product details (typed, or prefilled from a product link and reviewed).
+  requested_brand: optionalText(120),
+  requested_model: optionalText(100),
+  requested_sku: optionalText(100),
+  // Signed lookup token from "Get details". Never trusted here: the server
+  // action classifies it (lib/product/lookup-token.ts); any value is accepted
+  // so an invalid token can never block a submission.
+  product_lookup: z.string().optional().catch(undefined),
   priority: z.enum(PRIORITIES, { error: "Choose a priority for this item" }),
   essential_justification: z.string().trim().max(ESSENTIAL_JUSTIFICATION_MAX, `Keep this under ${ESSENTIAL_JUSTIFICATION_MAX} characters`).optional().or(z.literal("")),
 }).superRefine((item, issue) => {
@@ -59,7 +67,8 @@ export const lineItemSchema = z.object({
 /** A blank line item for the form; every new line gets its own priority. */
 export const EMPTY_LINE_ITEM = {
   description: "", specifications: "", color: "", size: "", quantity: "1", estimated_unit_price: "",
-  vendor_name: "", vendor_url: "", notes: "", priority: DEFAULT_PRIORITY, essential_justification: "",
+  vendor_name: "", vendor_url: "", notes: "", requested_brand: "", requested_model: "", requested_sku: "", product_lookup: "",
+  priority: DEFAULT_PRIORITY, essential_justification: "",
 } satisfies LineItemInput;
 
 export type LineItemInput = z.infer<typeof lineItemSchema>;
@@ -183,6 +192,9 @@ export function toDatabasePayload(v: RequisitionInput) {
       vendor_name: blank(i.vendor_name),
       vendor_url: blank(i.vendor_url),
       notes: blank(i.notes),
+      requested_brand: blank(i.requested_brand),
+      requested_model: blank(i.requested_model),
+      requested_sku: blank(i.requested_sku),
       priority: i.priority,
       essential_justification: i.priority === "essential" ? blank(i.essential_justification) : null,
     })),

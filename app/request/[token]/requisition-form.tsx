@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch, type Path } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CheckCircle2, FileUp, Paperclip, Plus, Trash2 } from "lucide-react";
@@ -23,6 +23,7 @@ import { comparePriority, countByPriority, isPriority } from "@/lib/priority";
 import { buildRequisitionSchema, EMPTY_LINE_ITEM, estimatedTotal, type RequisitionInput } from "@/lib/validation/requisition";
 import type { FormContext } from "@/lib/data/form-context";
 import { prepareReceiptUploads, submitExternalRequisition, type SubmissionSummary } from "./actions";
+import { FetchedValueButton, LookupTag, ProductLinkField, useProductLookups, type FillField } from "./product-link-field";
 
 export function RequisitionForm({ token, context, stamp }: { token: string; context: FormContext; stamp: string }) {
   const [summary, setSummary] = useState<SubmissionSummary | null>(null);
@@ -73,6 +74,11 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
   });
   const { register, control, handleSubmit, setValue, setError, formState: { errors } } = form;
   const { fields, append, remove } = useFieldArray({ control, name: "items" });
+  const fieldIds = useRef<string[]>([]);
+  useEffect(() => {
+    fieldIds.current = fields.map((f) => f.id);
+  }, [fields]);
+  const product = useProductLookups(form, token, (fieldId) => fieldIds.current.indexOf(fieldId));
 
   const departmentId = useWatch({ control, name: "department_id" });
   const requestTypeId = useWatch({ control, name: "request_type_id" });
@@ -330,6 +336,11 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
             const p = parseMoney(item?.estimated_unit_price ?? "");
             const line = q !== null && p !== null ? formatCents(lineTotal(q, p), context.currency) : "—";
             const e = errors.items?.[index];
+            const lookup = product.lookups[field.id];
+            const label = (text: string, name: FillField) => <>{text}<LookupTag lookup={lookup} name={name} value={item?.[name]} /></>;
+            const suggest = (name: FillField) => (
+              <FetchedValueButton lookup={lookup} name={name} value={item?.[name]} currency={context.currency} onUse={() => product.applyFetched(field.id, name)} />
+            );
             return (
               <div key={field.id} className="rounded-2xl border border-navy/12 bg-white p-4 ring-1 ring-navy/5">
                 <div className="mb-3 flex items-center justify-between">
@@ -338,40 +349,64 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
                     {isPriority(item?.priority) && item.priority !== "medium" ? <PriorityBadge priority={item.priority} size="sm" /> : null}
                   </p>
                   {fields.length > 1 ? (
-                    <button type="button" onClick={() => remove(index)} className="flex h-10 items-center gap-1.5 rounded-lg px-2 text-sm text-navy/70 hover:bg-navy/5">
+                    <button type="button" onClick={() => { product.forget(field.id); remove(index); }} className="flex h-10 items-center gap-1.5 rounded-lg px-2 text-sm text-navy/70 hover:bg-navy/5">
                       <Trash2 className="size-4" aria-hidden /> Remove
                     </button>
                   ) : null}
                 </div>
                 <div className="grid gap-3 sm:grid-cols-6">
-                  <Field className="sm:col-span-6" label="Item description" htmlFor={`items.${index}.description`} required error={e?.description?.message}>
+                  <ProductLinkField
+                    className="sm:col-span-6"
+                    index={index}
+                    lookup={lookup}
+                    now={product.now}
+                    urlValue={item?.vendor_url ?? ""}
+                    error={e?.vendor_url?.message}
+                    registration={register(`items.${index}.vendor_url`, { onChange: (event) => product.urlChanged(field.id, event.target.value) })}
+                    onGetDetails={() => product.getDetails(field.id)}
+                  />
+                  <Field className="sm:col-span-6" label={label("Item description", "description")} htmlFor={`items.${index}.description`} required error={e?.description?.message}>
                     <Input id={`items.${index}.description`} {...register(`items.${index}.description`)} aria-invalid={!!e?.description} />
+                    {suggest("description")}
                   </Field>
                   <Field className="sm:col-span-6" label="Specifications" htmlFor={`items.${index}.specifications`} error={e?.specifications?.message}>
-                    <Input id={`items.${index}.specifications`} placeholder="Model, brand, material…" {...register(`items.${index}.specifications`)} />
+                    <Input id={`items.${index}.specifications`} placeholder="Material, features, details…" {...register(`items.${index}.specifications`)} />
                   </Field>
-                  <Field className="sm:col-span-3" label="Color (optional)" htmlFor={`items.${index}.color`}>
+                  <Field className="sm:col-span-2" label={label("Brand (optional)", "requested_brand")} htmlFor={`items.${index}.requested_brand`} error={e?.requested_brand?.message}>
+                    <Input id={`items.${index}.requested_brand`} maxLength={120} {...register(`items.${index}.requested_brand`)} />
+                    {suggest("requested_brand")}
+                  </Field>
+                  <Field className="sm:col-span-2" label={label("Model / part number (optional)", "requested_model")} htmlFor={`items.${index}.requested_model`} error={e?.requested_model?.message}>
+                    <Input id={`items.${index}.requested_model`} maxLength={100} {...register(`items.${index}.requested_model`)} />
+                    {suggest("requested_model")}
+                  </Field>
+                  <Field className="sm:col-span-2" label={label("SKU / item number (optional)", "requested_sku")} htmlFor={`items.${index}.requested_sku`} error={e?.requested_sku?.message}>
+                    <Input id={`items.${index}.requested_sku`} maxLength={100} {...register(`items.${index}.requested_sku`)} />
+                    {suggest("requested_sku")}
+                  </Field>
+                  <Field className="sm:col-span-2" label={label("Color (optional)", "color")} htmlFor={`items.${index}.color`}>
                     <Input id={`items.${index}.color`} {...register(`items.${index}.color`)} />
+                    {suggest("color")}
                   </Field>
-                  <Field className="sm:col-span-3" label="Size (optional)" htmlFor={`items.${index}.size`}>
+                  <Field className="sm:col-span-2" label={label("Size (optional)", "size")} htmlFor={`items.${index}.size`}>
                     <Input id={`items.${index}.size`} {...register(`items.${index}.size`)} />
+                    {suggest("size")}
+                  </Field>
+                  <Field className="sm:col-span-2" label={label("Vendor name", "vendor_name")} htmlFor={`items.${index}.vendor_name`} error={e?.vendor_name?.message}>
+                    <Input id={`items.${index}.vendor_name`} {...register(`items.${index}.vendor_name`)} />
+                    {suggest("vendor_name")}
                   </Field>
                   <Field className="sm:col-span-2" label="Quantity" htmlFor={`items.${index}.quantity`} required error={e?.quantity?.message}>
                     <Input id={`items.${index}.quantity`} inputMode="decimal" className="tabular" {...register(`items.${index}.quantity`)} aria-invalid={!!e?.quantity} />
                   </Field>
-                  <Field className="sm:col-span-2" label="Est. unit price" htmlFor={`items.${index}.estimated_unit_price`} required error={e?.estimated_unit_price?.message}>
+                  <Field className="sm:col-span-2" label={label("Est. unit price", "estimated_unit_price")} htmlFor={`items.${index}.estimated_unit_price`} required error={e?.estimated_unit_price?.message}>
                     <MoneyInput id={`items.${index}.estimated_unit_price`} {...register(`items.${index}.estimated_unit_price`)} aria-invalid={!!e?.estimated_unit_price} />
+                    {suggest("estimated_unit_price")}
                   </Field>
                   <div className="sm:col-span-2">
                     <p className="mb-1.5 text-sm font-medium">Estimated total</p>
                     <p className="tabular flex h-12 items-center justify-end rounded-xl bg-neutral-gray px-3.5 text-lg font-bold">{line}</p>
                   </div>
-                  <Field className="sm:col-span-3" label="Vendor name" htmlFor={`items.${index}.vendor_name`} error={e?.vendor_name?.message}>
-                    <Input id={`items.${index}.vendor_name`} {...register(`items.${index}.vendor_name`)} />
-                  </Field>
-                  <Field className="sm:col-span-3" label="Vendor website / product link" htmlFor={`items.${index}.vendor_url`} error={e?.vendor_url?.message}>
-                    <Input id={`items.${index}.vendor_url`} type="url" inputMode="url" autoCapitalize="none" placeholder="https://" {...register(`items.${index}.vendor_url`)} aria-invalid={!!e?.vendor_url} />
-                  </Field>
                   <PriorityField
                     className="sm:col-span-6"
                     id={`items.${index}.priority`}

@@ -12,6 +12,7 @@ vi.mock("@/app/request/[token]/actions", () => ({
   submitExternalRequisition: (...args: unknown[]) => submitExternalRequisition(...args),
   prepareReceiptUploads: vi.fn(),
 }));
+vi.mock("@/app/request/[token]/product-actions", () => ({ getProductDetails: vi.fn() }));
 
 const { RequisitionForm } = await import("@/app/request/[token]/requisition-form");
 

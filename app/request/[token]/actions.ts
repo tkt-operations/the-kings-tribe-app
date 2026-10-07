@@ -1,22 +1,17 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { headers } from "next/headers";
 import { after } from "next/server";
 import { checkReceiptFile, RECEIPT_MAX_FILES } from "@/lib/receipt-files";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { loadFormContext, FORM_TOKEN_PATTERN } from "@/lib/data/form-context";
-import { fingerprint, verifyFormStamp } from "@/lib/spam";
+import { verifyFormStamp } from "@/lib/spam";
 import { buildRequisitionSchema, toDatabasePayload } from "@/lib/validation/requisition";
 import { notifyRequisitionSubmitted } from "@/lib/notify";
 import type { ActionResult } from "@/lib/action-result";
 import type { Priority } from "@/lib/priority";
-
-async function clientFingerprint() {
-  const h = await headers();
-  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? h.get("x-real-ip");
-  return fingerprint(ip ?? null, h.get("user-agent"));
-}
+import { classifyLookup, lookupPayload } from "@/lib/product/lookup-token";
+import { clientFingerprint } from "./fingerprint";
 
 const GENERIC = "We could not submit your request. Please check the form and try again.";
 
@@ -90,16 +85,36 @@ export async function submitExternalRequisition(
     .map((f) => ({ path: String(f.path), original_filename: String(f.original_filename ?? "receipt").slice(0, 255) }));
 
   const admin = createSupabaseAdminClient();
-  // Validates each line's priority, then submits — one transaction (migration 20261006000100).
-  const { data, error } = await admin.rpc("submit_requisition_with_priority", {
+  const clientFp = await clientFingerprint();
+  const payload = toDatabasePayload(parsed.data);
+
+  // Classify each line's signed product lookup. Only a verified lookup keeps
+  // source attribution; expired / changed-link / invalid ones keep the typed
+  // values without it. The response is identical in every case.
+  let formTokenId = "";
+  if (parsed.data.items.some((i) => i.product_lookup)) {
+    const { data: id } = await admin.rpc("resolve_form_token_id", { p_token: token });
+    formTokenId = id ? String(id) : "";
+  }
+  const rejected: { line: number; reason: string }[] = [];
+  const items = payload.items.map((line, index) => {
+    const classification = classifyLookup(parsed.data.items[index].product_lookup, { formTokenId, vendorUrl: line.vendor_url });
+    if (classification.status === "rejected") rejected.push({ line: index + 1, reason: classification.reason });
+    return { ...line, lookup: lookupPayload(classification, line) };
+  });
+  if (rejected.length) console.warn("product lookup token rejected", { lines: rejected, fingerprint: clientFp });
+
+  // Validates priorities, submits, then records each line's product snapshot —
+  // one transaction (migrations 20261006000100 and 20261008000100).
+  const { data, error } = await admin.rpc("submit_requisition_with_product", {
     p_token: token,
-    p_payload: toDatabasePayload(parsed.data),
+    p_payload: { ...payload, items },
     p_files: cleanFiles,
-    p_fingerprint: await clientFingerprint(),
+    p_fingerprint: clientFp,
   });
   if (error) {
     // Messages raised by our validation functions are user-facing; others are not.
-    if (error.code !== "P0001") console.error("submit_requisition_with_priority failed", { code: error.code, message: error.message });
+    if (error.code !== "P0001") console.error("submit_requisition_with_product failed", { code: error.code, message: error.message });
     return { ok: false, error: error.code === "P0001" ? error.message : GENERIC };
   }
   const result = data as SubmissionSummary & { id: string };
