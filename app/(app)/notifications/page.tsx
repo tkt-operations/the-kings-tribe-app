@@ -20,7 +20,7 @@ function requestTime(): number {
  * /notifications/[token] is a different, unauthenticated route and is unchanged.)
  */
 export default async function NotificationsPage({ searchParams }: PageProps<"/notifications">) {
-  const user = await requireUser();
+  await requireUser();
   const params = await searchParams;
   const filter: NotificationFilter = isNotificationFilter(params.filter) ? params.filter : "all";
   const page = Math.max(1, Math.min(1000, Number(typeof params.page === "string" ? params.page : 1) || 1));
@@ -36,8 +36,7 @@ export default async function NotificationsPage({ searchParams }: PageProps<"/no
   return (
     <>
       <PageHeader eyebrow="Inbox" title="Notifications" description="Activity that involves you. Needs Attention on the dashboard shows the work still waiting." />
-      {/* selfTest: TEMPORARY administrator-only Web Push self-test. */}
-      <PushSettings selfTest={user.roles.includes("administrator")} />
+      <PushSettings />
       <nav aria-label="Notification filters" className="-mx-1 mb-4 overflow-x-auto pb-1">
         <ul className="flex w-max gap-1.5 px-1">
           {NOTIFICATION_FILTERS.map((f) => (

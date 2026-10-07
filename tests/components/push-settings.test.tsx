@@ -20,13 +20,6 @@ vi.mock("@/app/(app)/notifications/push-actions", () => ({
   setPushLevel: (l: string) => setPushLevel(l),
 }));
 
-const listTestPushTargets = vi.fn();
-const sendTestPush = vi.fn();
-vi.mock("@/app/(app)/notifications/push-test-actions", () => ({
-  listTestPushTargets: () => listTestPushTargets(),
-  sendTestPush: (id: string) => sendTestPush(id),
-}));
-
 const { PushSettings, PUSH_COPY } = await import("@/components/notifications/push-settings");
 
 const KEY = "BAbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdEfGhIjK";
@@ -181,67 +174,5 @@ describe("phone notification states", () => {
     await screen.findByText("Phone notifications could not be turned on. Please try again.");
     await act(async () => {});
     expect(screen.getByRole("button", { name: "Turn on for this device" })).toBeTruthy();
-  });
-});
-
-describe("TEMPORARY administrator self-test control", () => {
-  const REQ = "0b6f0f9e-1c2d-4e3f-8a9b-0c1d2e3f4a5b";
-  const devices = [{ id: "d1", label: "iPhone · Safari", created_at: "2026-10-01T00:00:00Z", last_success_at: null, this_device: false }];
-  beforeEach(() => {
-    listTestPushTargets.mockReset();
-    sendTestPush.mockReset();
-    listTestPushTargets.mockResolvedValue({ ok: true, data: [{ id: REQ, requisition_number: "TKT-REQ-2026-0002", submitted_at: "2026-10-07T20:03:43Z" }] });
-    permission = "granted";
-    getPushStatus.mockImplementation(async () => status({ devices }));
-  });
-  const renderAs = (selfTest: boolean) => render(<ToastProvider><PushSettings selfTest={selfTest} /></ToastProvider>);
-
-  it("is not shown to non-administrators", async () => {
-    renderAs(false);
-    await waitFor(() => expect(statusText()).toBe(PUSH_COPY.grantedOff));
-    expect(screen.queryByTestId("push-self-test")).toBeNull();
-    expect(listTestPushTargets).not.toHaveBeenCalled();
-  });
-
-  it("is not shown when the administrator has no registered device, or push isn't configured", async () => {
-    getPushStatus.mockImplementation(async () => status({ devices: [] }));
-    const { unmount } = renderAs(true);
-    await waitFor(() => expect(statusText()).toBe(PUSH_COPY.grantedOff));
-    expect(screen.queryByTestId("push-self-test")).toBeNull();
-    unmount();
-    getPushStatus.mockImplementation(async () => status({ configured: false, devices }));
-    renderAs(true);
-    await waitFor(() => expect(statusText()).toBe(PUSH_COPY.notConfigured));
-    expect(screen.queryByTestId("push-self-test")).toBeNull();
-  });
-
-  it("uses a controlled requisition picker, sends once, and is disabled while sending", async () => {
-    let finish!: (v: unknown) => void;
-    sendTestPush.mockImplementation(() => new Promise((r) => { finish = r; }));
-    renderAs(true);
-    const select = (await screen.findByLabelText("Requisition to open")) as HTMLSelectElement;
-    await waitFor(() => expect(screen.getByRole("option", { name: "TKT-REQ-2026-0002" })).toBeTruthy());
-    const button = screen.getByRole("button", { name: "Send test notification" }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true); // nothing chosen yet
-    fireEvent.change(select, { target: { value: REQ } });
-    expect(button.disabled).toBe(false);
-    fireEvent.click(button);
-    await waitFor(() => expect(screen.getByRole("button", { name: /Sending/ })).toBeTruthy());
-    expect((screen.getByRole("button", { name: /Sending/ }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: /Sending/ })); // double tap while pending
-    expect(sendTestPush).toHaveBeenCalledTimes(1);
-    expect(sendTestPush).toHaveBeenCalledWith(REQ);
-    await act(async () => finish({ ok: true, data: { devices: 1, sent: 1 }, message: "Test notification sent to 1 device. Tap it on your phone." }));
-    expect(screen.getAllByText("Test notification sent to 1 device. Tap it on your phone.").length).toBeGreaterThan(0);
-  });
-
-  it("shows a server refusal (e.g. rate limit) without crashing", async () => {
-    sendTestPush.mockResolvedValue({ ok: false, error: "A test notification was sent recently. Please wait a minute before sending another." });
-    renderAs(true);
-    const select = await screen.findByLabelText("Requisition to open");
-    await screen.findByRole("option", { name: "TKT-REQ-2026-0002" }); // wait for the picker to load
-    fireEvent.change(select, { target: { value: REQ } });
-    fireEvent.click(screen.getByRole("button", { name: "Send test notification" }));
-    expect((await screen.findAllByText(/sent recently/)).length).toBeGreaterThan(0);
   });
 });

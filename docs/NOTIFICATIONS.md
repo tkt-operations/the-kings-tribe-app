@@ -134,6 +134,12 @@ The unread count drives `navigator.setAppBadge` / `clearAppBadge`, from the app 
 3. Redeploy, because `NEXT_PUBLIC_` values are built into the app.
 4. Keep the same key pair from then on. Changing it means every device must turn phone notifications on again.
 
+### Production acceptance record
+- **Release 2 Web Push production acceptance passed** on an installed iPhone Home Screen app.
+- **Push delivery succeeded** (VAPID-signed, accepted by Apple's push service, shown on the lock screen with the generic text).
+- **Deep link:** with the app already open on the Requisitions list, tapping a notification for `/requisitions/<UUID>` opened that exact requisition's detail page.
+- **The fix:** the original regression (the tap only brought the already-open app forward) was fixed by the exact-route `notificationclick` handling and the app-side navigation fallback described above.
+
 ### Device acceptance (manual; not verified until done on real devices)
 - **iPhone/iPad (iOS 16.4 or later):**
   1. Safari → Share → Add to Home Screen, then open the app from the icon and sign in.
@@ -143,16 +149,3 @@ The unread count drives `navigator.setAppBadge` / `clearAppBadge`, from the app 
   5. Tap it: after sign-in if needed, you land on the requisition. Mark all as read clears the badge.
   6. "Turn off for this device" stops alerts. A denied permission still leaves the inbox working.
 - **Android (Chrome):** install the app (or use the browser), then repeat the same steps.
-
-### TEMPORARY: administrator self-test (remove after device testing)
-- **What it is:** a "Send test notification" control in the Phone notifications card. It's shown only to **administrators** who have push configured and a registered device.
-- **What it sends:** one fixed alert ("The Kings Tribe — Notification test — tap to open requisition") to **their own** device(s). It deep-links to a requisition they choose from their own recent list (`/requisitions/<uuid>`).
-- **What it writes:** only subscription health, through `record_push_results`. No workflow event, inbox notification, email, audit entry or requisition change.
-- **Limits:** at most one per minute and five per hour per administrator.
-- **To remove it,** delete:
-  - `app/(app)/notifications/push-test-actions.ts`
-  - `lib/push/self-test.ts`
-  - `buildTestPushPayload` / `TEST_PUSH_BODY` in `lib/push/payload.ts`
-  - the `PushSelfTest` component and `selfTest` prop in `components/notifications/push-settings.tsx`
-  - the `selfTest` prop in `app/(app)/notifications/page.tsx`
-  - the self-test tests (`tests/unit/push/self-test.test.ts` and the self-test blocks in `tests/components/push-settings.test.tsx` and `tests/db/web-push.test.ts`)
