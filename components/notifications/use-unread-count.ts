@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { POLL_INTERVAL_MS } from "@/lib/notifications/types";
 import { loadUnreadCount } from "@/app/(app)/notifications/actions";
+import { updateAppBadge } from "./badge";
 import { NOTIFICATIONS_CHANGED } from "./events";
 
 /**
@@ -68,6 +69,11 @@ export function useUnreadCount(userId: string, initial: number) {
       stopRealtime();
     };
   }, [userId, refresh]);
+
+  // Installed-app badge mirrors the unread count (no-op where unsupported).
+  useEffect(() => {
+    updateAppBadge(unread);
+  }, [unread]);
 
   return { unread, setUnread, version, refresh };
 }

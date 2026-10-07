@@ -11,6 +11,7 @@ import { notifyRequisitionSubmitted } from "@/lib/notify";
 import type { ActionResult } from "@/lib/action-result";
 import type { Priority } from "@/lib/priority";
 import { classifyLookup, lookupPayload } from "@/lib/product/lookup-token";
+import { schedulePushDispatch } from "@/lib/push/schedule";
 import { clientFingerprint } from "./fingerprint";
 
 const GENERIC = "We could not submit your request. Please check the form and try again.";
@@ -119,6 +120,7 @@ export async function submitExternalRequisition(
   }
   const result = data as SubmissionSummary & { id: string };
   after(() => notifyRequisitionSubmitted(result.id));
+  schedulePushDispatch();
   return {
     ok: true,
     data: {

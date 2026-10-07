@@ -587,6 +587,10 @@ Requesters who tick **"Also text me status updates"** then receive short texts. 
 | `EMAIL_FROM` | For email | **Server-only** | No | Your verified sender (§7.4) |
 | `RECEIPTS_INBOUND_ADDRESS` | For receipt emails | **Server-only** | No | Resend receiving address (§8) |
 | `RESEND_WEBHOOK_SECRET` | For receipt emails | **Server-only** | **Secret** | Resend webhook signing secret (§8) |
+| `RESEND_DELIVERY_WEBHOOK_SECRET` | For email delivery status | **Server-only** | **Secret** | Resend delivery webhook signing secret |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | For phone notifications | Browser-safe | No | `npx web-push generate-vapid-keys` (public key) — see docs/NOTIFICATIONS.md |
+| `VAPID_PRIVATE_KEY` | For phone notifications | **Server-only** | **Secret** | Same command (private key) |
+| `VAPID_SUBJECT` | For phone notifications | **Server-only** | No | `mailto:` address for push services, e.g. `mailto:operations@yourchurch.org` |
 | `TWILIO_ACCOUNT_SID` | Optional | **Server-only** | No | Twilio Console (§14) |
 | `TWILIO_AUTH_TOKEN` | Optional | **Server-only** | **Secret** | Twilio Console (§14) |
 | `TWILIO_FROM_NUMBER` or `TWILIO_MESSAGING_SERVICE_SID` | Optional | **Server-only** | No | Twilio (§14) |

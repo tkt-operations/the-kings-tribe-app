@@ -11,6 +11,9 @@ export function serverEnv() {
     resendWebhookSecret: process.env.RESEND_WEBHOOK_SECRET ?? "",
     // Signing secret of the Resend delivery-status webhook (/api/email-events). Server-only.
     resendDeliveryWebhookSecret: process.env.RESEND_DELIVERY_WEBHOOK_SECRET ?? "",
+    // Web Push (VAPID) private key and contact subject. Server-only. Empty = push off.
+    vapidPrivateKey: (process.env.VAPID_PRIVATE_KEY ?? "").trim(),
+    vapidSubject: (process.env.VAPID_SUBJECT ?? "").trim(),
     twilioAccountSid: process.env.TWILIO_ACCOUNT_SID ?? "",
     twilioAuthToken: process.env.TWILIO_AUTH_TOKEN ?? "",
     twilioFromNumber: process.env.TWILIO_FROM_NUMBER ?? "",

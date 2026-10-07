@@ -7,6 +7,7 @@ import { matchInboundEmail } from "@/lib/inbound/match";
 import { downloadAttachment, getReceivedEmail, listReceivedAttachments } from "@/lib/inbound/resend";
 import { checkReceiptFile, RECEIPT_MAX_BYTES, RECEIPT_MAX_FILES } from "@/lib/receipt-files";
 import { notifyReceiptReceived } from "@/lib/notify";
+import { schedulePushDispatch } from "@/lib/push/schedule";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -112,6 +113,7 @@ export async function POST(request: NextRequest) {
   const r = result as { duplicate: boolean; receipt_id: string | null; requisition_id: string | null; status: string };
   if (!r.duplicate && r.receipt_id) {
     after(() => notifyReceiptReceived(r.requisition_id, { source: "email", from: email.from, unmatched: !r.requisition_id }));
+    schedulePushDispatch();
   }
   return NextResponse.json({ ok: true, status: r.status ?? "duplicate" });
 }

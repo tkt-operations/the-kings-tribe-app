@@ -129,7 +129,8 @@ Request types are rows in a table, not code. Each type uses one of five workflow
 - Inbox rows (`user_notifications`) are created **only by database triggers** on workflow tables, in the same transaction as the change. Recipients come from the permission tables, never from role names. External requesters keep receiving email only.
 - Each user reads only their own rows, and only while they still hold the permission a row requires. Read state changes through `mark_notification_read` / `mark_all_notifications_read`.
 - The dashboard's **Needs attention** cards are live workflow state (`my_needs_attention()`), not notification history.
-- See [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md) for the event catalog, routing and actor rules. Web Push is not part of Release 1.
+- Optional **phone notifications** (Web Push) alert users to important and actionable items. They are best effort, use generic lock-screen text, and need the VAPID variables (off when unset).
+- See [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md) for the event catalog, routing, actor rules and push setup.
 
 ## Branding
 

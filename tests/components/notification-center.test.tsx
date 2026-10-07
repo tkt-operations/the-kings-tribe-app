@@ -205,6 +205,26 @@ describe("live updates", () => {
   });
 });
 
+describe("app badge", () => {
+  it("mirrors the unread count where the Badge API exists, and clears at zero", async () => {
+    const setAppBadge = vi.fn(async () => {});
+    const clearAppBadge = vi.fn(async () => {});
+    Object.assign(navigator, { setAppBadge, clearAppBadge });
+    renderShell(3);
+    await waitFor(() => expect(setAppBadge).toHaveBeenCalledWith(3));
+    loadUnreadCount.mockResolvedValue({ ok: true, data: 0 });
+    await act(async () => window.dispatchEvent(new Event("tkt:notifications-changed")));
+    await waitFor(() => expect(clearAppBadge).toHaveBeenCalled());
+    delete (navigator as unknown as Record<string, unknown>).setAppBadge;
+    delete (navigator as unknown as Record<string, unknown>).clearAppBadge;
+  });
+
+  it("works normally where the Badge API is missing", async () => {
+    renderShell(2);
+    expect(bells()[0].getAttribute("aria-label")).toBe("Notifications, 2 unread");
+  });
+});
+
 describe("/notifications list", () => {
   const renderList = (rows: UserNotification[]) =>
     render(<ToastProvider><NotificationList rows={rows} now={Date.now()} timeZone="America/Chicago" emptyMessage="No notifications yet." /></ToastProvider>);

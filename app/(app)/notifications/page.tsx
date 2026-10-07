@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 import { getChurchSettings } from "@/lib/data/settings";
 import { listNotifications } from "@/lib/notifications/queries";
 import { FILTER_LABELS, isNotificationFilter, NOTIFICATION_FILTERS, type NotificationFilter } from "@/lib/notifications/types";
+import { PushSettings } from "@/components/notifications/push-settings";
 import { NotificationList } from "./notification-list";
 
 export const metadata = { title: "Notifications" };
@@ -35,6 +36,7 @@ export default async function NotificationsPage({ searchParams }: PageProps<"/no
   return (
     <>
       <PageHeader eyebrow="Inbox" title="Notifications" description="Activity that involves you. Needs Attention on the dashboard shows the work still waiting." />
+      <PushSettings />
       <nav aria-label="Notification filters" className="-mx-1 mb-4 overflow-x-auto pb-1">
         <ul className="flex w-max gap-1.5 px-1">
           {NOTIFICATION_FILTERS.map((f) => (

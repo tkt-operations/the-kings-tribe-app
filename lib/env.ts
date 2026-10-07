@@ -11,6 +11,8 @@ export function publicEnv() {
     supabasePublishableKey:
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
     appUrl: (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/+$/, ""),
+    // Web Push application-server PUBLIC key (safe to expose). Empty = push off.
+    vapidPublicKey: (process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? "").trim(),
   };
 }
 

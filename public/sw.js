@@ -3,6 +3,10 @@
  * Caches ONLY static, non-sensitive assets (brand files, icons, fonts, Next
  * static chunks) and an offline fallback page. Financial pages and API data
  * are never cached: navigations always go to the network.
+ *
+ * Web Push: shows a short, generic alert (plain text) and opens an allowlisted
+ * in-app path when tapped. Push payloads are never cached. Opening the app
+ * still goes through normal sign-in and permission checks.
  */
 const VERSION = "tkt-v1";
 const STATIC_CACHE = `${VERSION}-static`;
@@ -58,4 +62,72 @@ self.addEventListener("fetch", (event) => {
       ),
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// Web Push
+// ---------------------------------------------------------------------------
+const PUSH_TITLE = "The Kings Tribe";
+const PUSH_FALLBACK = "You have a new notification";
+// Same allowlist as the server (lib/notifications/links.ts): fixed in-app paths only.
+const SAFE_PATH = /^\/(requisitions\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|receipts|dashboard|notifications)$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function safePath(value) {
+  return typeof value === "string" && SAFE_PATH.test(value) ? value : "/notifications";
+}
+
+function setBadge(count) {
+  try {
+    const nav = self.navigator;
+    if (!nav || typeof nav.setAppBadge !== "function" || typeof nav.clearAppBadge !== "function") return Promise.resolve();
+    return (count > 0 ? nav.setAppBadge(count) : nav.clearAppBadge()).catch(() => {});
+  } catch {
+    return Promise.resolve();
+  }
+}
+
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = {};
+  }
+  const body = typeof data.body === "string" && data.body.trim() ? data.body.trim().slice(0, 120) : PUSH_FALLBACK;
+  const options = {
+    body,
+    icon: "/icons/icon-192.png",
+    data: { url: safePath(data.url) },
+  };
+  if (typeof data.tag === "string" && UUID.test(data.tag)) options.tag = data.tag;
+  const badge = Number.isInteger(data.badge) && data.badge >= 0 ? data.badge : null;
+  event.waitUntil(
+    Promise.all([
+      self.registration.showNotification(PUSH_TITLE, options),
+      badge === null ? Promise.resolve() : setBadge(badge),
+    ]),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = new URL(safePath(event.notification.data && event.notification.data.url), self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (windows) => {
+      for (const client of windows) {
+        if (new URL(client.url).origin !== self.location.origin) continue;
+        const focused = typeof client.focus === "function" ? await client.focus() : client;
+        if (focused && typeof focused.navigate === "function") {
+          try {
+            await focused.navigate(target);
+          } catch {
+            // Navigation can be refused for uncontrolled clients; the app is focused anyway.
+          }
+        }
+        return;
+      }
+      if (self.clients.openWindow) await self.clients.openWindow(target);
+    }),
+  );
 });

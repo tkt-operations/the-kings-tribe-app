@@ -10,6 +10,7 @@ import { isIsoDate } from "@/lib/dates";
 import { parseMoney, parseQuantity } from "@/lib/money";
 import { ESSENTIAL_JUSTIFICATION_MAX, ESSENTIAL_JUSTIFICATION_MIN, PRIORITIES } from "@/lib/priority";
 import { notifyPurchaseOrderIssued, notifyReceiptReceived, notifyStatusChange } from "@/lib/notify";
+import { schedulePushDispatch } from "@/lib/push/schedule";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isRequisitionStatus, type RequisitionStatus } from "@/lib/workflow/status";
 
@@ -30,6 +31,8 @@ async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
 }
 
 function refresh(requisitionId: string) {
+  // Any committed change may have queued in-app notifications: alert by push (best effort, after the response).
+  schedulePushDispatch();
   revalidatePath(`/requisitions/${requisitionId}`);
   revalidatePath("/requisitions");
   revalidatePath("/purchase-orders");
