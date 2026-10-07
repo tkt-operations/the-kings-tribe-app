@@ -4,8 +4,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { extractJsonLdBlocks, extractMetaTags, parseJsonLd } from "@/lib/product/html-extract";
 import { extractProductFromJsonLd } from "@/lib/product/jsonld";
-import { cleanText, decodeEntities, normalizePrice, titleFromSlug } from "@/lib/product/normalize";
-import { extractFromMeta } from "@/lib/product/open-graph";
+import { cleanText, decodeEntities, normalizePrice, stripSiteSuffix, titleFromSlug } from "@/lib/product/normalize";
+import { extractFromMeta, isProductMeta } from "@/lib/product/open-graph";
 
 const fixture = (name: string) => readFileSync(path.join(__dirname, "fixtures", name), "utf8");
 const fromJsonLd = (html: string, variant?: string) => extractProductFromJsonLd(extractJsonLdBlocks(html), variant);
@@ -82,7 +82,7 @@ describe("JSON-LD", () => {
     for (const value of Object.values(product.fields)) expect(value).not.toMatch(/[<>]/);
     // A ">" inside a meta attribute ends the tag, so the markup-laden title is simply dropped.
     expect(extractFromMeta(extractMetaTags(html))?.fields.title).toBeUndefined();
-    expect(extractFromMeta(extractMetaTags(`<meta property="og:title" content="&lt;b&gt;Safe&lt;/b&gt; title">`))?.fields.title).toBe("Safe title");
+    expect(extractFromMeta(extractMetaTags(`<meta property="og:type" content="product"><meta property="og:title" content="&lt;b&gt;Safe&lt;/b&gt; title">`))?.fields.title).toBe("Safe title");
   });
 });
 
@@ -132,5 +132,69 @@ describe("cleaning", () => {
     expect(titleFromSlug("Shure_SM58_Cardioid.html", /_+/)).toBe("Shure SM58 Cardioid");
     expect(titleFromSlug("ab")).toBeUndefined();
     expect(titleFromSlug(undefined)).toBeUndefined();
+  });
+});
+
+describe("Open Graph product qualification", () => {
+  const meta = (tags: Record<string, string>) => new Map(Object.entries(tags));
+
+  it.each([
+    [{ "og:type": "product" }],
+    [{ "og:type": "product.item" }],
+    [{ "og:type": "Product.Group" }],
+    [{ "product:price:amount": "10" }],
+    [{ "product:brand": "Lifetime" }],
+    [{ "product:retailer_item_id": "123" }],
+    [{ "og:price:amount": "10" }],
+  ])("accepts product evidence %j", (tags) => {
+    expect(isProductMeta(meta(tags))).toBe(true);
+    expect(extractFromMeta(meta({ ...tags, "og:title": "Folding Table" }))?.fields.title).toBe("Folding Table");
+  });
+
+  it.each([[{}], [{ "og:type": "website" }], [{ "og:type": "article" }], [{ "product:price:amount": "  " }]])("rejects pages without product evidence %j", (tags) => {
+    expect(isProductMeta(meta(tags))).toBe(false);
+    expect(extractFromMeta(meta({ ...tags, "og:title": "Vocal Microphone", "og:site_name": "Shure" }))).toBeNull();
+  });
+
+  it("a generic page title is not presented as product information", () => {
+    expect(extractFromMeta(extractMetaTags(fixture("generic-og-not-product.html")))).toBeNull();
+  });
+
+  it("Walmart-style product.item pages give the title (price is not in standard metadata)", () => {
+    expect(extractFromMeta(extractMetaTags(fixture("walmart-og-product.html")))).toMatchObject({ fields: { vendor_name: "Walmart.com" }, price: null });
+    expect(fromJsonLd(fixture("walmart-og-product.html"))).toBeNull(); // WebPage only; app data is not read
+  });
+
+  it("JSON-LD support is unchanged: Product inside an array next to an invalid block, and a ProductGroup without offers", () => {
+    expect(fromJsonLd(fixture("gc-product-array.html"))).toEqual({
+      fields: { title: "Shure SM58 Dynamic Cardioid Vocal Microphone", brand: "Shure", sku: "1274034494045" }, price: "109.00", currency: "USD", priceNote: null,
+    });
+    expect(fromJsonLd(fixture("productgroup-no-offers.html"))).toEqual({ fields: { title: "Wireless GO II", brand: "RØDE" }, price: null, currency: null, priceNote: null });
+    expect(fromJsonLd(fixture("no-structured-data.html"))).toBeNull();
+    expect(extractFromMeta(extractMetaTags(fixture("no-structured-data.html")))).toBeNull();
+  });
+});
+
+describe("retailer/site suffix cleanup", () => {
+  it.each([
+    ["Lifetime 6 Foot Folding Table (80306) - Walmart.com", ["Walmart.com"], "Lifetime 6 Foot Folding Table (80306)"],
+    ["Shure SM58-LC Dynamic Handheld Vocal Microphone | Guitar Center", ["Guitar Center"], "Shure SM58-LC Dynamic Handheld Vocal Microphone"],
+    ["Folding Table – Example Store", [null, "example store"], "Folding Table"],
+    ["Desk Lamp | officesupplies.example", ["officesupplies.example"], "Desk Lamp"],
+    ["Desk Lamp - Walmart", ["walmart.com"], "Desk Lamp"],
+    ["A - B - Walmart.com", ["Walmart.com"], "A - B"],
+  ])("strips %j", (title, names, expected) => {
+    expect(stripSiteSuffix(title, names)).toBe(expected);
+  });
+
+  it.each([
+    ["Wireless GO II | Dual Wireless Mic System | RØDE (US)", ["RØDE Microphones"]], // not an exact site-name match
+    ["SM58 - Vocal Microphone", ["Shure"]],
+    ["Copies - Walmart.com", ["Target"]],
+    ["Cable 6ft - 2 pack", ["Monoprice"]],
+    ["X - Walmart.com", ["Walmart.com"]], // remainder too short
+    ["Plain title", ["Walmart.com"]],
+  ])("leaves %j alone", (title, names) => {
+    expect(stripSiteSuffix(title, names)).toBe(title);
   });
 });

@@ -3,8 +3,9 @@ import "server-only";
 import { findAdapter, generic } from "@/lib/product/adapters";
 import { extractJsonLdBlocks, extractMetaTags } from "@/lib/product/html-extract";
 import { extractProductFromJsonLd, type ExtractedProduct } from "@/lib/product/jsonld";
+import { cleanText, stripSiteSuffix } from "@/lib/product/normalize";
 import { extractFromMeta } from "@/lib/product/open-graph";
-import { safeFetch, type SafeFetchOptions, type SafeFetchResult } from "@/lib/product/safe-fetch";
+import { safeFetch, type SafeFetchFailure, type SafeFetchOptions, type SafeFetchResult } from "@/lib/product/safe-fetch";
 import { PRODUCT_FIELD_KEYS, type LookupMethod, type LookupOutcome, type PriceNote, type ProductFields } from "@/lib/product/types";
 import { checkProductUrl, displayDomain } from "@/lib/product/url";
 
@@ -24,6 +25,21 @@ export interface LookupResult {
   priceNote: PriceNote | null;
   /** The normalised link that was looked up (what a token is bound to). */
   normalizedUrl: string;
+  diagnostics: LookupDiagnostics;
+}
+
+/**
+ * Operational facts about a lookup, for server logs. Deliberately contains no
+ * URL, path, query string, IP address, token or requester information.
+ */
+export interface LookupDiagnostics {
+  /** Adapter that handled the link ("generic" for other sites). */
+  vendor: string;
+  /** What happened on the network: "none" (hint-only), "rate_limited", "ok", or the fetch failure. */
+  network: "none" | "rate_limited" | "ok" | "error" | SafeFetchFailure;
+  stage: "page" | "redirects" | null;
+  status: number | null;
+  ms: number | null;
 }
 
 export interface LookupDeps {
@@ -44,12 +60,26 @@ export async function lookupProduct(rawUrl: string, deps: LookupDeps = {}): Prom
   let adapter = findAdapter(checked.host);
   let hintUrl: URL | null = checked.url;
   let domain = displayDomain(checked.host);
+  const diagnostics: LookupDiagnostics = { vendor: adapter.id, network: "none", stage: null, status: null, ms: null };
+  const timed = async (stage: "page" | "redirects", fn: () => Promise<SafeFetchResult>) => {
+    const started = Date.now();
+    const result = await safeCall(fn);
+    Object.assign(diagnostics, {
+      stage,
+      ms: Date.now() - started,
+      network: result === null ? "error" : result.ok ? "ok" : result.reason,
+      status: result?.ok ? result.status : (result?.status ?? null),
+    });
+    return result;
+  };
 
   if (adapter.resolveRedirects) {
     // Short link: follow redirects only (no page body), then use the target's hints.
     hintUrl = null;
-    if (await allowed(domain)) {
-      const resolved = await safeCall(() => doFetch(checked.normalized, { ...deps.fetchOptions, mode: "redirects" }));
+    if (!(await allowed(domain))) {
+      diagnostics.network = "rate_limited";
+    } else {
+      const resolved = await timed("redirects", () => doFetch(checked.normalized, { ...deps.fetchOptions, mode: "redirects" }));
       if (resolved?.ok) {
         const target = findAdapter(resolved.finalUrl.hostname);
         if (target !== generic) {
@@ -64,23 +94,35 @@ export async function lookupProduct(rawUrl: string, deps: LookupDeps = {}): Prom
   const hints = hintUrl ? adapter.hints(hintUrl) : {};
   let structured: ExtractedProduct | null = null;
   let meta: ExtractedProduct | null = null;
+  let siteName: string | undefined;
 
-  if (adapter.fetchPage && !adapter.resolveRedirects && (await allowed(domain))) {
-    const page = await safeCall(() => doFetch(checked.normalized, { ...deps.fetchOptions, mode: "page" }));
-    if (page?.ok) {
-      const variant = (adapter.variantSku ?? generic.variantSku)?.(checked.url) ?? null;
-      structured = extractProductFromJsonLd(extractJsonLdBlocks(page.body), variant);
-      meta = extractFromMeta(extractMetaTags(page.body));
+  if (adapter.fetchPage && !adapter.resolveRedirects) {
+    if (!(await allowed(domain))) {
+      diagnostics.network = "rate_limited";
+    } else {
+      const page = await timed("page", () => doFetch(checked.normalized, { ...deps.fetchOptions, mode: "page" }));
+      if (page?.ok) {
+        const variant = (adapter.variantSku ?? generic.variantSku)?.(checked.url) ?? null;
+        const metaTags = extractMetaTags(page.body);
+        structured = extractProductFromJsonLd(extractJsonLdBlocks(page.body), variant);
+        meta = extractFromMeta(metaTags); // null unless the page is established as a product page
+        siteName = cleanText(metaTags.get("og:site_name"), 200);
+      }
     }
   }
 
-  const vendorName = adapter.displayName || meta?.fields.vendor_name || undefined;
+  // The site's own name is used as the vendor only on a recognised product page.
+  const isProductPage = Boolean(structured || meta);
+  const vendorName = adapter.displayName || (isProductPage ? siteName : undefined) || undefined;
   const fields: ProductFields = {};
   for (const key of PRODUCT_FIELD_KEYS) {
     const value = structured?.fields[key] ?? meta?.fields[key] ?? hints[key];
     if (value) fields[key] = value;
   }
   if (vendorName) fields.vendor_name = vendorName;
+  else delete fields.vendor_name;
+  // "Product Name - Walmart.com" → "Product Name" (exact site-name matches only).
+  if (fields.title) fields.title = stripSiteSuffix(fields.title, [siteName, adapter.displayName, domain]);
 
   const price = structured?.price ?? (structured?.priceNote ? null : meta?.price) ?? null;
   const currency = price ? "USD" : null;
@@ -114,6 +156,7 @@ export async function lookupProduct(rawUrl: string, deps: LookupDeps = {}): Prom
       currency: method === "url_hint" ? null : currency,
       priceNote: method === "url_hint" ? null : priceNote,
       normalizedUrl: checked.normalized,
+      diagnostics,
     },
   };
 }

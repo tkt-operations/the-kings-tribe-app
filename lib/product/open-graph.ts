@@ -1,12 +1,24 @@
 /**
- * Open Graph / product meta fallback: og:title, og:site_name, product:brand,
- * product:retailer_item_id and product:price:* (or og:price:*), with the same
- * price rules as structured data (USD only).
+ * Open Graph / product meta fallback. Generic Open Graph (og:title on any
+ * page) is NOT product information: it is used only when the page declares
+ * itself a product (og:type product…) or carries product-specific tags
+ * (product:price:*, product:brand, product:retailer_item_id, og:price:*).
+ * Prices follow the same rules as structured data (USD only).
  */
 import type { ExtractedProduct } from "@/lib/product/jsonld";
 import { cleanFields, normalizePrice } from "@/lib/product/normalize";
 
+const PRODUCT_TAGS = ["product:price:amount", "product:brand", "product:retailer_item_id", "og:price:amount", "og:brand"];
+
+/** Does the page's meta establish it as a product page? */
+export function isProductMeta(meta: Map<string, string>): boolean {
+  const type = (meta.get("og:type") ?? "").trim().toLowerCase();
+  if (type === "product" || type.startsWith("product.") || type === "og:product") return true;
+  return PRODUCT_TAGS.some((tag) => (meta.get(tag) ?? "").trim() !== "");
+}
+
 export function extractFromMeta(meta: Map<string, string>): ExtractedProduct | null {
+  if (!isProductMeta(meta)) return null;
   const fields = cleanFields({
     title: meta.get("og:title"),
     vendor_name: meta.get("og:site_name"),

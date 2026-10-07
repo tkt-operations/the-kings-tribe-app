@@ -80,3 +80,36 @@ export function titleFromSlug(slug: string | undefined | null, separator: RegExp
   const cleaned = cleanText(title, PRODUCT_FIELD_MAX.title);
   return cleaned && cleaned.length >= 3 ? cleaned : undefined;
 }
+
+const SUFFIX_SEPARATOR = /\s+(?:-|\||–|—|:)\s+/g;
+
+function siteKey(value: string): string {
+  return value.toLowerCase().replace(/^www\./, "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Remove ONE trailing " - Site" / " | Site" suffix when it exactly matches a
+ * known site name (og:site_name, the vendor's name or its domain, with or
+ * without ".com"). Anything else is left untouched.
+ */
+export function stripSiteSuffix(title: string | undefined, siteNames: (string | null | undefined)[]): string | undefined {
+  if (!title) return title;
+  // The LAST separator: "A - B - Walmart.com" → suffix "Walmart.com".
+  let last: RegExpExecArray | null = null;
+  for (const m of title.matchAll(SUFFIX_SEPARATOR)) last = m as RegExpExecArray;
+  if (!last) return title;
+  const suffixText = title.slice(last.index + last[0].length);
+  if (suffixText.length < 2 || suffixText.length > 60) return title;
+  const keys = new Set<string>();
+  for (const name of siteNames) {
+    if (!name) continue;
+    const key = siteKey(name);
+    if (!key) continue;
+    keys.add(key);
+    keys.add(key.replace(/\.(com|net|org|co\.uk|ca|us)$/, ""));
+  }
+  const suffix = siteKey(suffixText);
+  if (!keys.has(suffix) && !keys.has(suffix.replace(/\.(com|net|org|co\.uk|ca|us)$/, ""))) return title;
+  const rest = title.slice(0, last.index).trim();
+  return rest.length >= 3 ? rest : title;
+}

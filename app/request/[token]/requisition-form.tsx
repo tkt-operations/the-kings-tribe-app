@@ -23,7 +23,7 @@ import { comparePriority, countByPriority, isPriority } from "@/lib/priority";
 import { buildRequisitionSchema, EMPTY_LINE_ITEM, estimatedTotal, type RequisitionInput } from "@/lib/validation/requisition";
 import type { FormContext } from "@/lib/data/form-context";
 import { prepareReceiptUploads, submitExternalRequisition, type SubmissionSummary } from "./actions";
-import { FetchedValueButton, LookupTag, ProductLinkField, useProductLookups, type FillField } from "./product-link-field";
+import { FieldLookupNote, LookupTag, ProductLinkField, useProductLookups, type FillField } from "./product-link-field";
 
 export function RequisitionForm({ token, context, stamp }: { token: string; context: FormContext; stamp: string }) {
   const [summary, setSummary] = useState<SubmissionSummary | null>(null);
@@ -78,7 +78,10 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
   useEffect(() => {
     fieldIds.current = fields.map((f) => f.id);
   }, [fields]);
-  const product = useProductLookups(form, token, (fieldId) => fieldIds.current.indexOf(fieldId));
+  const product = useProductLookups(form, token, {
+    indexOf: (fieldId) => fieldIds.current.indexOf(fieldId),
+    ids: () => fieldIds.current,
+  });
 
   const departmentId = useWatch({ control, name: "department_id" });
   const requestTypeId = useWatch({ control, name: "request_type_id" });
@@ -158,11 +161,14 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
     }
   };
 
-  const onSubmit = (event: React.FormEvent<HTMLFormElement>) =>
-    handleSubmit(submitValid, () => {
+  const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    // A product link changed without leaving the field: clear the previous product's untouched details first.
+    product.commitAll();
+    return handleSubmit(submitValid, () => {
       toast.error(REVIEW_FIELDS_MESSAGE);
       focusFirstInvalidSoon(formRef.current);
     })(event);
+  };
 
   const busy = phase !== "idle";
 
@@ -336,11 +342,14 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
             const p = parseMoney(item?.estimated_unit_price ?? "");
             const line = q !== null && p !== null ? formatCents(lineTotal(q, p), context.currency) : "—";
             const e = errors.items?.[index];
-            const lookup = product.lookups[field.id];
-            const label = (text: string, name: FillField) => <>{text}<LookupTag lookup={lookup} name={name} value={item?.[name]} /></>;
+            const lookupLine = product.lines[field.id];
+            const urlValue = item?.vendor_url ?? "";
+            const label = (text: string, name: FillField) => <>{text}<LookupTag line={lookupLine} name={name} value={item?.[name]} urlValue={urlValue} /></>;
             const suggest = (name: FillField) => (
-              <FetchedValueButton lookup={lookup} name={name} value={item?.[name]} currency={context.currency} onUse={() => product.applyFetched(field.id, name)} />
+              <FieldLookupNote line={lookupLine} name={name} value={item?.[name]} currency={context.currency} urlValue={urlValue} onUse={() => product.applyFetched(field.id, name)} />
             );
+            // Typing into a product field marks an auto-filled value as edited by the requester.
+            const productField = (name: FillField) => register(`items.${index}.${name}`, { onChange: () => product.fieldEdited(field.id, name) });
             return (
               <div key={field.id} className="rounded-2xl border border-navy/12 bg-white p-4 ring-1 ring-navy/5">
                 <div className="mb-3 flex items-center justify-between">
@@ -358,49 +367,53 @@ function FormBody({ token, context, stamp, onSubmitted }: { token: string; conte
                   <ProductLinkField
                     className="sm:col-span-6"
                     index={index}
-                    lookup={lookup}
+                    line={lookupLine}
                     now={product.now}
-                    urlValue={item?.vendor_url ?? ""}
+                    urlValue={urlValue}
                     error={e?.vendor_url?.message}
-                    registration={register(`items.${index}.vendor_url`, { onChange: (event) => product.urlChanged(field.id, event.target.value) })}
+                    registration={register(`items.${index}.vendor_url`, {
+                      onChange: (event) => product.urlChanged(field.id, event.target.value),
+                      onBlur: () => product.commitUrl(field.id),
+                    })}
                     onGetDetails={() => product.getDetails(field.id)}
+                    onUndo={() => product.undoClear(field.id)}
                   />
                   <Field className="sm:col-span-6" label={label("Item description", "description")} htmlFor={`items.${index}.description`} required error={e?.description?.message}>
-                    <Input id={`items.${index}.description`} {...register(`items.${index}.description`)} aria-invalid={!!e?.description} />
+                    <Input id={`items.${index}.description`} {...productField("description")} aria-invalid={!!e?.description} />
                     {suggest("description")}
                   </Field>
                   <Field className="sm:col-span-6" label="Specifications" htmlFor={`items.${index}.specifications`} error={e?.specifications?.message}>
                     <Input id={`items.${index}.specifications`} placeholder="Material, features, details…" {...register(`items.${index}.specifications`)} />
                   </Field>
                   <Field className="sm:col-span-2" label={label("Brand (optional)", "requested_brand")} htmlFor={`items.${index}.requested_brand`} error={e?.requested_brand?.message}>
-                    <Input id={`items.${index}.requested_brand`} maxLength={120} {...register(`items.${index}.requested_brand`)} />
+                    <Input id={`items.${index}.requested_brand`} maxLength={120} {...productField("requested_brand")} />
                     {suggest("requested_brand")}
                   </Field>
                   <Field className="sm:col-span-2" label={label("Model / part number (optional)", "requested_model")} htmlFor={`items.${index}.requested_model`} error={e?.requested_model?.message}>
-                    <Input id={`items.${index}.requested_model`} maxLength={100} {...register(`items.${index}.requested_model`)} />
+                    <Input id={`items.${index}.requested_model`} maxLength={100} {...productField("requested_model")} />
                     {suggest("requested_model")}
                   </Field>
                   <Field className="sm:col-span-2" label={label("SKU / item number (optional)", "requested_sku")} htmlFor={`items.${index}.requested_sku`} error={e?.requested_sku?.message}>
-                    <Input id={`items.${index}.requested_sku`} maxLength={100} {...register(`items.${index}.requested_sku`)} />
+                    <Input id={`items.${index}.requested_sku`} maxLength={100} {...productField("requested_sku")} />
                     {suggest("requested_sku")}
                   </Field>
                   <Field className="sm:col-span-2" label={label("Color (optional)", "color")} htmlFor={`items.${index}.color`}>
-                    <Input id={`items.${index}.color`} {...register(`items.${index}.color`)} />
+                    <Input id={`items.${index}.color`} {...productField("color")} />
                     {suggest("color")}
                   </Field>
                   <Field className="sm:col-span-2" label={label("Size (optional)", "size")} htmlFor={`items.${index}.size`}>
-                    <Input id={`items.${index}.size`} {...register(`items.${index}.size`)} />
+                    <Input id={`items.${index}.size`} {...productField("size")} />
                     {suggest("size")}
                   </Field>
                   <Field className="sm:col-span-2" label={label("Vendor name", "vendor_name")} htmlFor={`items.${index}.vendor_name`} error={e?.vendor_name?.message}>
-                    <Input id={`items.${index}.vendor_name`} {...register(`items.${index}.vendor_name`)} />
+                    <Input id={`items.${index}.vendor_name`} {...productField("vendor_name")} />
                     {suggest("vendor_name")}
                   </Field>
                   <Field className="sm:col-span-2" label="Quantity" htmlFor={`items.${index}.quantity`} required error={e?.quantity?.message}>
                     <Input id={`items.${index}.quantity`} inputMode="decimal" className="tabular" {...register(`items.${index}.quantity`)} aria-invalid={!!e?.quantity} />
                   </Field>
                   <Field className="sm:col-span-2" label={label("Est. unit price", "estimated_unit_price")} htmlFor={`items.${index}.estimated_unit_price`} required error={e?.estimated_unit_price?.message}>
-                    <MoneyInput id={`items.${index}.estimated_unit_price`} {...register(`items.${index}.estimated_unit_price`)} aria-invalid={!!e?.estimated_unit_price} />
+                    <MoneyInput id={`items.${index}.estimated_unit_price`} {...productField("estimated_unit_price")} aria-invalid={!!e?.estimated_unit_price} />
                     {suggest("estimated_unit_price")}
                   </Field>
                   <div className="sm:col-span-2">

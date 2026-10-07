@@ -8,7 +8,7 @@ import { LoadingButton } from "@/components/ui/submit-button";
 import { cn } from "@/lib/cn";
 import { formatMoney, parseMoney } from "@/lib/money";
 import { LOOKUP_TOKEN_TTL_MS, type LookupOutcome, type PriceNote, type ProductFields } from "@/lib/product/types";
-import { checkProductUrl } from "@/lib/product/url";
+import { canonicalProductUrl, checkProductUrl } from "@/lib/product/url";
 import type { RequisitionInput } from "@/lib/validation/requisition";
 import { getProductDetails } from "./product-actions";
 
@@ -18,10 +18,20 @@ import { getProductDetails } from "./product-actions";
  * (a "Use fetched value" suggestion appears instead). Every field stays
  * editable and manual entry always works — a failed lookup never blocks
  * submission.
+ *
+ * Per line, the form remembers which fields the lookup filled (and with what)
+ * and which of those the requester has since edited. When the link changes to
+ * a genuinely different product, only untouched auto-filled values are
+ * cleared; typed and edited values are kept (edited ones carry a "previous
+ * product" warning), and the old lookup token is dropped for good.
  */
 
 export type FillField =
   | "description" | "requested_brand" | "requested_model" | "requested_sku" | "vendor_name" | "color" | "size" | "estimated_unit_price";
+
+export const FILL_FIELDS: readonly FillField[] = [
+  "description", "requested_brand", "requested_model", "requested_sku", "vendor_name", "color", "size", "estimated_unit_price",
+];
 
 const FIELD_SOURCES: [FillField, keyof ProductFields | "price"][] = [
   ["description", "title"],
@@ -37,24 +47,52 @@ const FIELD_SOURCES: [FillField, keyof ProductFields | "price"][] = [
 export const LOOKUP_MESSAGES = {
   failed: "We couldn't retrieve all of this product's information. Please complete the details below.",
   partial: "We found some details. Please complete the rest below.",
-  stale: "These details came from the previous link. Select Get details again to keep the product source.",
+  linkChanged: "The product link changed. Select Get details to look up the new product.",
+  cleared: "The product link changed, so details filled from the previous product were cleared. Check the details for the new product.",
+  changedKept: "The product link changed. Some details below came from the previous product — check them for the new product.",
+  restored: "Details from the previous product were restored. Check that they apply to this product.",
+  previousProduct: "From the previous product — check this still applies.",
   expired: "The product lookup has expired. Your entries will be submitted as typed. Select Get details again to keep the product source.",
   invalid: "Enter a full web address starting with https://",
   multiplePrices: "This page lists more than one price. Please enter the price for the item you want.",
   otherCurrency: "The price on this page isn't in US dollars. Please enter the price manually.",
 } as const;
 
+/** The lookup for the line's current (or most recently looked-up) link. */
 export interface LineLookup {
-  status: "loading" | "done" | "error" | "stale";
-  /** The trimmed link the lookup was made for. */
+  status: "loading" | "done" | "error";
+  /** The trimmed link the lookup was made for, and its canonical form. */
   url: string;
+  canonical: string | null;
   token: string | null;
   issuedAt: number | null;
   outcome: LookupOutcome | null;
   message: string;
   priceNote: PriceNote | null;
+  /** Values the lookup supplied, by form field. */
   fetched: Partial<Record<FillField, string>>;
+  /** Fields the lookup actually populated (were empty, or "Use fetched value"). */
   filled: FillField[];
+  /** Filled fields the requester has since typed into (sticky). */
+  edited: FillField[];
+}
+
+/** What is left of the previous product after the link changed. */
+export interface PreviousProduct {
+  /** Untouched auto-filled values that were cleared (for Undo; emptied once a new lookup starts). */
+  cleared: Partial<Record<FillField, string>>;
+  /** How many values were cleared (for the notice). */
+  clearedCount: number;
+  /** Kept fields that came from the previous product and need checking. */
+  warned: FillField[];
+  restored: boolean;
+  /** Hidden once a new lookup retrieves product details for the new link. */
+  showNotice: boolean;
+}
+
+export interface LineState {
+  lookup: LineLookup | null;
+  previous: PreviousProduct | null;
 }
 
 function successMessage(outcome: LookupOutcome, domain: string, vendor: string | undefined): string {
@@ -80,8 +118,16 @@ export function tokenIssuedAt(token: string | null): number | null {
 const sameValue = (name: FillField, a: string, b: string) =>
   name === "estimated_unit_price" ? parseMoney(a) !== null && parseMoney(a) === parseMoney(b) : a.trim() === b.trim();
 
-export function useProductLookups(form: UseFormReturn<RequisitionInput>, formToken: string, indexOf: (fieldId: string) => number) {
-  const [lookups, setLookups] = useState<Record<string, LineLookup>>({});
+const EMPTY_LINE: LineState = { lookup: null, previous: null };
+
+export function useProductLookups(
+  form: UseFormReturn<RequisitionInput>,
+  formToken: string,
+  lines: { indexOf: (fieldId: string) => number; ids: () => string[] },
+) {
+  const [state, setState] = useState<Record<string, LineState>>({});
+  // Mirror for synchronous reads in event handlers (state updates are async).
+  const stateRef = useRef<Record<string, LineState>>({});
   const [now, setNow] = useState(() => Date.now());
   const requests = useRef<Record<string, number>>({});
 
@@ -90,27 +136,104 @@ export function useProductLookups(form: UseFormReturn<RequisitionInput>, formTok
     return () => clearInterval(timer);
   }, []);
 
-  const update = (fieldId: string, next: LineLookup | null) =>
-    setLookups((all) => {
-      const copy = { ...all };
-      if (next) copy[fieldId] = next;
-      else delete copy[fieldId];
-      return copy;
+  const read = (fieldId: string): LineState => stateRef.current[fieldId] ?? EMPTY_LINE;
+  const write = (fieldId: string, next: LineState | null) => {
+    const all = { ...stateRef.current };
+    if (next && (next.lookup || next.previous)) all[fieldId] = next;
+    else delete all[fieldId];
+    stateRef.current = all;
+    setState(all);
+  };
+  const valueOf = (index: number, name: FillField | "vendor_url") => String(form.getValues(`items.${index}.${name}`) ?? "");
+
+  /**
+   * The link was edited. The token is submitted only while the link still
+   * matches the looked-up product; fields are not cleared on each keystroke
+   * (see commitUrl). An in-flight lookup for another link is abandoned.
+   */
+  function urlChanged(fieldId: string, value: string) {
+    const { lookup, previous } = read(fieldId);
+    if (!lookup) return;
+    const index = lines.indexOf(fieldId);
+    const matches = canonicalProductUrl(value) === lookup.canonical;
+    if (lookup.status === "loading" && !matches) {
+      requests.current[fieldId] = (requests.current[fieldId] ?? 0) + 1;
+      write(fieldId, { lookup: null, previous });
+      return;
+    }
+    if (index >= 0) form.setValue(`items.${index}.product_lookup`, matches && lookup.status === "done" && lookup.token ? lookup.token : "");
+  }
+
+  /**
+   * Called when the link is committed (leaving the field, Get details, or
+   * Submit). If it now points to a genuinely different product, clear ONLY
+   * untouched auto-filled values of the previous product, keep everything the
+   * requester typed or edited (warning on edited previous-product values), and
+   * drop the previous token for good. Never touches other lines.
+   */
+  function commitUrl(fieldId: string) {
+    const { lookup, previous } = read(fieldId);
+    if (!lookup || lookup.status === "loading") return;
+    const index = lines.indexOf(fieldId);
+    if (index < 0) return;
+    if (canonicalProductUrl(valueOf(index, "vendor_url")) === lookup.canonical) return;
+
+    const cleared: Partial<Record<FillField, string>> = {};
+    const warned = new Set<FillField>(previous?.warned ?? []);
+    for (const name of lookup.filled) {
+      const fetched = lookup.fetched[name];
+      const current = valueOf(index, name);
+      if (!fetched || !current.trim()) continue;
+      if (!lookup.edited.includes(name) && sameValue(name, current, fetched)) {
+        form.setValue(`items.${index}.${name}`, "", { shouldDirty: true });
+        cleared[name] = current;
+        warned.delete(name);
+      } else {
+        warned.add(name);
+      }
+    }
+    form.setValue(`items.${index}.product_lookup`, "");
+    const changed = Object.keys(cleared).length > 0 || warned.size > 0;
+    write(fieldId, {
+      lookup: null,
+      previous: changed ? { cleared, clearedCount: Object.keys(cleared).length, warned: [...warned], restored: false, showNotice: true } : previous,
     });
+  }
+
+  /** Undo: restore cleared values only into fields that are still empty. Never restores the token. */
+  function undoClear(fieldId: string) {
+    const { lookup, previous } = read(fieldId);
+    const index = lines.indexOf(fieldId);
+    if (!previous || previous.restored || index < 0) return;
+    const warned = new Set(previous.warned);
+    for (const [name, value] of Object.entries(previous.cleared) as [FillField, string][]) {
+      if (valueOf(index, name).trim() !== "") continue; // never overwrite what the requester entered since
+      form.setValue(`items.${index}.${name}`, value, { shouldDirty: true, shouldValidate: true });
+      warned.add(name);
+    }
+    write(fieldId, { lookup, previous: { cleared: {}, clearedCount: 0, warned: [...warned], restored: true, showNotice: true } });
+  }
 
   async function getDetails(fieldId: string) {
-    const index = indexOf(fieldId);
+    commitUrl(fieldId);
+    const index = lines.indexOf(fieldId);
     if (index < 0) return;
-    const url = String(form.getValues(`items.${index}.vendor_url`) ?? "").trim();
-    const base: LineLookup = { status: "error", url, token: null, issuedAt: null, outcome: null, message: "", priceNote: null, fetched: {}, filled: [] };
+    const url = valueOf(index, "vendor_url").trim();
+    const { previous } = read(fieldId);
+    // Undo is no longer offered once a new lookup starts (never mix the old product into the new one).
+    const quietPrevious = previous ? { ...previous, cleared: {} } : null;
+    const base: LineLookup = {
+      status: "error", url, canonical: canonicalProductUrl(url), token: null, issuedAt: null, outcome: null,
+      message: "", priceNote: null, fetched: {}, filled: [], edited: [],
+    };
     if (!checkProductUrl(url).ok) {
-      update(fieldId, { ...base, message: LOOKUP_MESSAGES.invalid });
+      write(fieldId, { lookup: { ...base, message: LOOKUP_MESSAGES.invalid }, previous: quietPrevious });
       return;
     }
     const requestId = (requests.current[fieldId] ?? 0) + 1;
     requests.current[fieldId] = requestId;
     form.setValue(`items.${index}.product_lookup`, "");
-    update(fieldId, { ...base, status: "loading" });
+    write(fieldId, { lookup: { ...base, status: "loading" }, previous: quietPrevious });
 
     let result: Awaited<ReturnType<typeof getProductDetails>> | null = null;
     try {
@@ -119,16 +242,16 @@ export function useProductLookups(form: UseFormReturn<RequisitionInput>, formTok
       result = null;
     }
     // Ignore answers for a link that has since changed or a line that was removed.
-    const current = indexOf(fieldId);
+    const current = lines.indexOf(fieldId);
     if (requests.current[fieldId] !== requestId || current < 0) return;
-    if (String(form.getValues(`items.${current}.vendor_url`) ?? "").trim() !== url) return;
+    if (valueOf(current, "vendor_url").trim() !== url) return;
+    const latestPrevious = read(fieldId).previous;
 
     if (!result || !result.ok) {
-      update(fieldId, { ...base, message: result && !result.ok ? result.error : LOOKUP_MESSAGES.failed });
+      write(fieldId, { lookup: { ...base, message: result && !result.ok ? result.error : LOOKUP_MESSAGES.failed }, previous: latestPrevious });
       return;
     }
     const data = result.data;
-    const values = form.getValues(`items.${current}`);
     const fetched: Partial<Record<FillField, string>> = {};
     const filled: FillField[] = [];
     for (const [name, source] of FIELD_SOURCES) {
@@ -136,7 +259,7 @@ export function useProductLookups(form: UseFormReturn<RequisitionInput>, formTok
       if (!value && name === "vendor_name" && data.outcome === "domain") value = data.domain;
       if (!value) continue;
       fetched[name] = value;
-      if (String(values[name] ?? "").trim() === "") {
+      if (valueOf(current, name).trim() === "") {
         form.setValue(`items.${current}.${name}`, value, { shouldDirty: true, shouldValidate: true });
         filled.push(name);
       }
@@ -147,68 +270,97 @@ export function useProductLookups(form: UseFormReturn<RequisitionInput>, formTok
       successMessage(data.outcome, data.domain, data.fields.vendor_name),
       priceNote === "multiple" ? LOOKUP_MESSAGES.multiplePrices : priceNote === "currency" ? LOOKUP_MESSAGES.otherCurrency : null,
     ].filter(Boolean).join(" ");
-    update(fieldId, { status: "done", url, token: data.token, issuedAt: tokenIssuedAt(data.token), outcome: data.outcome, message, priceNote, fetched, filled });
+    const warned = (latestPrevious?.warned ?? []).filter((name) => !filled.includes(name));
+    // The "previous product" notice stays until the new lookup actually finds product details.
+    const keepNotice = Boolean(latestPrevious?.showNotice && !data.method);
+    write(fieldId, {
+      lookup: { ...base, status: "done", token: data.token, issuedAt: tokenIssuedAt(data.token), outcome: data.outcome, message, priceNote, fetched, filled },
+      previous: latestPrevious && (warned.length || keepNotice) ? { ...latestPrevious, warned, showNotice: keepNotice } : null,
+    });
 
     // Move to the first required detail that is still missing.
-    const after = form.getValues(`items.${current}`);
-    const missing = !String(after.description ?? "").trim() ? "description" : !String(after.estimated_unit_price ?? "").trim() ? "estimated_unit_price" : null;
+    const missing = !valueOf(current, "description").trim() ? "description" : !valueOf(current, "estimated_unit_price").trim() ? "estimated_unit_price" : null;
     if (missing) setTimeout(() => document.getElementById(`items.${current}.${missing}`)?.focus(), 0);
   }
 
-  /** The link was edited: a lookup for the old link no longer applies. */
-  function urlChanged(fieldId: string, value: string) {
-    const lookup = lookups[fieldId];
-    if (!lookup || value.trim() === lookup.url) return;
-    requests.current[fieldId] = (requests.current[fieldId] ?? 0) + 1;
-    const index = indexOf(fieldId);
-    if (index >= 0) form.setValue(`items.${index}.product_lookup`, "");
-    if (lookup.status === "done" && lookup.token) {
-      update(fieldId, { ...lookup, status: "stale", token: null, issuedAt: null, message: LOOKUP_MESSAGES.stale, filled: [], fetched: {} });
-    } else {
-      update(fieldId, null);
-    }
+  /** The requester typed into a product field. */
+  function fieldEdited(fieldId: string, name: FillField) {
+    const { lookup, previous } = read(fieldId);
+    const markEdited = Boolean(lookup && lookup.filled.includes(name) && !lookup.edited.includes(name));
+    const unwarn = Boolean(previous?.warned.includes(name));
+    if (!markEdited && !unwarn) return;
+    write(fieldId, {
+      lookup: lookup && markEdited ? { ...lookup, edited: [...lookup.edited, name] } : lookup,
+      previous: previous && unwarn ? { ...previous, warned: previous.warned.filter((n) => n !== name) } : previous,
+    });
   }
 
   function applyFetched(fieldId: string, name: FillField) {
-    const lookup = lookups[fieldId];
-    const index = indexOf(fieldId);
+    const { lookup, previous } = read(fieldId);
+    const index = lines.indexOf(fieldId);
     const value = lookup?.fetched[name];
     if (!lookup || index < 0 || !value) return;
     form.setValue(`items.${index}.${name}`, value, { shouldDirty: true, shouldValidate: true });
-    update(fieldId, { ...lookup, filled: lookup.filled.includes(name) ? lookup.filled : [...lookup.filled, name] });
+    write(fieldId, {
+      lookup: { ...lookup, filled: lookup.filled.includes(name) ? lookup.filled : [...lookup.filled, name], edited: lookup.edited.filter((n) => n !== name) },
+      previous: previous ? { ...previous, warned: previous.warned.filter((n) => n !== name) } : null,
+    });
+  }
+
+  /** Before submitting: apply any link change that was not committed yet (e.g. Enter in the link field). */
+  function commitAll() {
+    for (const id of lines.ids()) commitUrl(id);
   }
 
   function forget(fieldId: string) {
     requests.current[fieldId] = (requests.current[fieldId] ?? 0) + 1;
-    update(fieldId, null);
+    write(fieldId, null);
   }
 
-  return { lookups, now, getDetails, urlChanged, applyFetched, forget };
+  return { lines: state, now, getDetails, urlChanged, commitUrl, commitAll, undoClear, fieldEdited, applyFetched, forget };
 }
 
 export function ProductLinkField({
   index,
-  lookup,
+  line,
   now,
   registration,
   error,
   urlValue,
   onGetDetails,
+  onUndo,
   className,
 }: {
   index: number;
-  lookup: LineLookup | undefined;
+  line: LineState | undefined;
   now: number;
   registration: UseFormRegisterReturn;
   error?: string;
   urlValue: string;
   onGetDetails: () => void;
+  onUndo: () => void;
   className?: string;
 }) {
   const id = `items.${index}.vendor_url`;
+  const lookup = line?.lookup ?? null;
+  const previous = line?.previous ?? null;
   const loading = lookup?.status === "loading";
-  const expired = Boolean(lookup?.status === "done" && lookup.token && lookup.issuedAt && now - lookup.issuedAt > LOOKUP_TOKEN_TTL_MS);
-  const message = expired ? LOOKUP_MESSAGES.expired : lookup?.message ?? "";
+  const differs = Boolean(lookup && !loading && canonicalProductUrl(urlValue) !== lookup.canonical);
+  const linkChanged = Boolean(differs && lookup && (lookup.filled.length || lookup.token));
+  const expired = Boolean(!differs && lookup?.status === "done" && lookup.token && lookup.issuedAt && now - lookup.issuedAt > LOOKUP_TOKEN_TTL_MS);
+  const message = loading
+    ? "Getting product details…"
+    : linkChanged ? LOOKUP_MESSAGES.linkChanged : differs ? "" : expired ? LOOKUP_MESSAGES.expired : lookup?.message ?? "";
+  const notice = previous?.showNotice
+    ? previous.restored
+      ? LOOKUP_MESSAGES.restored
+      : previous.clearedCount
+        ? LOOKUP_MESSAGES.cleared
+        : previous.warned.length
+          ? LOOKUP_MESSAGES.changedKept
+          : ""
+    : "";
+  const canUndo = Boolean(previous?.showNotice && !previous.restored && Object.keys(previous.cleared).length);
   return (
     <div className={cn("rounded-xl bg-neutral-gray p-3", className)}>
       <Field label="Product link (optional)" htmlFor={id} error={error} hint="Paste a link and we'll fill in whatever product information we can.">
@@ -220,18 +372,27 @@ export function ProductLinkField({
           </LoadingButton>
         </div>
       </Field>
+      <p id={`${id}-previous-notice`} aria-live="polite" className={cn("text-[13px] font-medium text-navy", notice ? "mt-2" : "sr-only")}>
+        {notice}
+        {canUndo ? (
+          <button type="button" onClick={onUndo} className="ml-2 min-h-10 font-bold text-ministry-blue underline-offset-2 hover:underline">
+            Undo
+          </button>
+        ) : null}
+      </p>
       <p id={`${id}-lookup-status`} aria-live="polite" className={cn("text-[13px] font-medium text-navy", message ? "mt-2" : "sr-only")}>
-        {loading ? "Getting product details…" : message}
+        {message}
       </p>
     </div>
   );
 }
 
-/** "Filled" / "Edited" marker beside a field's label. */
-export function LookupTag({ lookup, name, value }: { lookup: LineLookup | undefined; name: FillField; value: string | undefined }) {
-  if (!lookup || lookup.status !== "done" || !lookup.filled.includes(name)) return null;
+/** "Filled" / "Edited" marker beside a field's label (only while the lookup matches the current link). */
+export function LookupTag({ line, name, value, urlValue }: { line: LineState | undefined; name: FillField; value: string | undefined; urlValue: string }) {
+  const lookup = line?.lookup;
+  if (!lookup || lookup.status !== "done" || !lookup.filled.includes(name) || canonicalProductUrl(urlValue) !== lookup.canonical) return null;
   const fetched = lookup.fetched[name] ?? "";
-  const edited = !sameValue(name, String(value ?? ""), fetched);
+  const edited = lookup.edited.includes(name) || !sameValue(name, String(value ?? ""), fetched);
   return (
     <span className={cn("ml-2 rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide", edited ? "bg-gold/25 text-navy" : "bg-ministry-blue/10 text-ministry-blue")}>
       {edited ? "Edited" : "Filled"}
@@ -239,11 +400,21 @@ export function LookupTag({ lookup, name, value }: { lookup: LineLookup | undefi
   );
 }
 
-/** Offered under a field the requester had already filled in with a different value. */
-export function FetchedValueButton({ lookup, name, value, currency, onUse }: { lookup: LineLookup | undefined; name: FillField; value: string | undefined; currency: string; onUse: () => void }) {
-  if (!lookup || lookup.status !== "done" || lookup.filled.includes(name)) return null;
-  const fetched = lookup.fetched[name];
+/**
+ * Under a field: a warning when its value came from the previous product, or
+ * a "Use fetched value" suggestion when the requester had already filled it
+ * in with something different.
+ */
+export function FieldLookupNote({ line, name, value, currency, urlValue, onUse }: {
+  line: LineState | undefined; name: FillField; value: string | undefined; currency: string; urlValue: string; onUse: () => void;
+}) {
   const current = String(value ?? "");
+  if (line?.previous?.warned.includes(name) && current.trim()) {
+    return <p className="mt-1.5 text-[13px] font-medium text-navy/75"><span aria-hidden className="mr-1 inline-block size-2 rounded-full bg-gold" />{LOOKUP_MESSAGES.previousProduct}</p>;
+  }
+  const lookup = line?.lookup;
+  if (!lookup || lookup.status !== "done" || lookup.filled.includes(name) || canonicalProductUrl(urlValue) !== lookup.canonical) return null;
+  const fetched = lookup.fetched[name];
   if (!fetched || !current.trim() || sameValue(name, current, fetched)) return null;
   const shown = name === "estimated_unit_price" ? formatMoney(fetched, currency) : fetched;
   return (

@@ -34,6 +34,7 @@ const URL_A = "https://www.officedepot.com/a/products/5791037/Chair/";
 const LOOKUP = {
   outcome: "full", domain: "officedepot.com", method: "structured_data", normalizedUrl: URL_A,
   fields: { title: "Mesh Chair", brand: "Realspace", sku: "5791037" }, price: "249.99", currency: "USD", priceNote: null,
+  diagnostics: { vendor: "generic", network: "ok", stage: "page", status: 200, ms: 120 },
 };
 
 let rateLimit: Record<string, boolean>;
@@ -179,6 +180,45 @@ describe("submitExternalRequisition — product lookup classification", () => {
     // An oversized token never blocks submission either.
     const huge = await submitExternalRequisition(FORM_TOKEN, base([{ vendor_url: URL_A, product_lookup: "x".repeat(10_000) }]), [], stamp(), "");
     expect(huge).toEqual(clean);
+    warn.mockRestore();
+  });
+});
+
+describe("lookup failure diagnostics", () => {
+  const FULL_URL = "https://www.smallshop.example/item/9?ref=secret-campaign&email=jordan@example.org";
+  const incomplete = { ...LOOKUP, outcome: "domain", method: null, domain: "smallshop.example", fields: {}, price: null, currency: null,
+    diagnostics: { vendor: "generic", network: "timeout", stage: "page", status: null, ms: 8003 } };
+
+  it("logs only domain, vendor, outcome, method and network facts", async () => {
+    lookupProduct.mockResolvedValue({ ok: true, result: incomplete });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await getProductDetails(FORM_TOKEN, FULL_URL);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("product lookup incomplete", {
+      domain: "smallshop.example", vendor: "generic", outcome: "domain", method: null, network: "timeout", stage: "page", status: null, ms: 8003,
+    });
+    const logged = JSON.stringify(warn.mock.calls);
+    for (const forbidden of [FULL_URL, "/item/9", "secret-campaign", "jordan@example.org", "203.0.113.7", FORM_TOKEN, FORM_ID, "Vitest", "v1."]) {
+      expect(logged).not.toContain(forbidden);
+    }
+    warn.mockRestore();
+  });
+
+  it("logs a blocked page that fell back to link hints", async () => {
+    lookupProduct.mockResolvedValue({ ok: true, result: { ...LOOKUP, outcome: "hints", method: "url_hint", domain: "walmart.com", diagnostics: { vendor: "walmart", network: "http_error", stage: "page", status: 403, ms: 300 } } });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await getProductDetails(FORM_TOKEN, "https://www.walmart.com/ip/x/189144292");
+    expect(warn).toHaveBeenCalledWith("product lookup incomplete", expect.objectContaining({ vendor: "walmart", network: "http_error", status: 403 }));
+    warn.mockRestore();
+  });
+
+  it("does not log successful lookups or hint-only vendors (no network request)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    lookupProduct.mockResolvedValue({ ok: true, result: LOOKUP });
+    await getProductDetails(FORM_TOKEN, URL_A);
+    lookupProduct.mockResolvedValue({ ok: true, result: { ...LOOKUP, outcome: "hints", method: "url_hint", diagnostics: { vendor: "sweetwater", network: "none", stage: null, status: null, ms: null } } });
+    await getProductDetails(FORM_TOKEN, "https://www.sweetwater.com/store/detail/SM58--shure-sm58");
+    expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });
 });

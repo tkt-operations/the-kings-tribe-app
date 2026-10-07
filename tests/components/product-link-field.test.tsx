@@ -35,6 +35,17 @@ const el = (id: string) => document.getElementById(id) as HTMLInputElement;
 const change = (id: string, value: string) => fireEvent.change(el(id), { target: { value } });
 const getDetails = (line = 0) => fireEvent.click(el(`items.${line}.vendor_url`).closest("div.rounded-xl")!.querySelector("button")!);
 const status = (line = 0) => document.getElementById(`items.${line}.vendor_url-lookup-status`)!.textContent;
+const notice = (line = 0) => document.getElementById(`items.${line}.vendor_url-previous-notice`)!.textContent;
+const commitLink = (line: number, url: string) => {
+  change(`items.${line}.vendor_url`, url);
+  fireEvent.blur(el(`items.${line}.vendor_url`));
+};
+/** Text of one field's own wrapper (label, control, notes) — the money input sits inside an extra relative div. */
+const fieldNote = (line: number, name: string) => {
+  let wrapper = el(`items.${line}.${name}`).parentElement!;
+  if (wrapper.classList.contains("relative")) wrapper = wrapper.parentElement!;
+  return wrapper.textContent;
+};
 const fakeToken = (at = Date.now()) => `v1.${Buffer.from(JSON.stringify({ at })).toString("base64url")}.sig`;
 
 const result = (over: Partial<ProductLookupResponse> = {}): ActionResult<ProductLookupResponse> => ({
@@ -218,21 +229,6 @@ describe("product link field", () => {
     expect(el("items.1.estimated_unit_price").value).toBe("");
   });
 
-  it("changing the link after a lookup drops the token and asks for Get details again", async () => {
-    getProductDetails.mockResolvedValue(result());
-    renderForm();
-    change("items.0.vendor_url", URL_A);
-    getDetails();
-    await waitFor(() => expect(status()).toContain("Filled from"));
-    change("items.0.vendor_url", "https://www.officedepot.com/a/products/999/Desk/");
-    expect(status()).toBe(LOOKUP_MESSAGES.stale);
-    expect(screen.queryAllByText("Filled")).toHaveLength(0);
-    fillRequester();
-    const items = await submitAndGetItems();
-    expect(items[0].product_lookup).toBe("");
-    expect(items[0].description).toBe("Ergonomic Mesh Chair"); // typed values are kept
-  });
-
   it("an expired lookup is explained but does not block submission", async () => {
     getProductDetails.mockResolvedValue(result({ token: fakeToken(Date.now() - 25 * 3600 * 1000) }));
     renderForm();
@@ -268,5 +264,183 @@ describe("product link field", () => {
     change("items.0.vendor_url", "https://example.com/other");
     await act(async () => resolve(result()));
     expect(el("items.0.description").value).toBe("");
+  });
+});
+
+const SWEETWATER_RESULT = () => result({
+  outcome: "hints", domain: "sweetwater.com", method: "url_hint", price: null, currency: null,
+  fields: { title: "Shure SM58 Cardioid Dynamic Vocal Microphone", sku: "SM58", vendor_name: "Sweetwater" },
+});
+const OFFICE_DEPOT = "https://www.officedepot.com/a/products/273646/Office-Depot-Brand-Copier-Paper-Letter/";
+
+async function lookUpSweetwater(line = 0) {
+  getProductDetails.mockResolvedValueOnce(SWEETWATER_RESULT());
+  change(`items.${line}.vendor_url`, SWEETWATER);
+  getDetails(line);
+  await waitFor(() => expect(status(line)).toContain("Sweetwater"));
+}
+
+describe("changing the product link (Product A → Product B)", () => {
+  it("clears only untouched auto-filled values, keeps typed and edited values, and drops the token", async () => {
+    renderForm();
+    change("items.0.requested_brand", "Shure"); // typed BEFORE the lookup
+    await lookUpSweetwater();
+    expect(el("items.0.description").value).toBe("Shure SM58 Cardioid Dynamic Vocal Microphone");
+    expect(el("items.0.requested_sku").value).toBe("SM58");
+    change("items.0.vendor_name", "Sweetwater Sound"); // auto-filled, then EDITED
+    change("items.0.color", "Black"); // typed AFTER the lookup into an empty field
+    commitLink(0, OFFICE_DEPOT);
+    // Untouched auto-filled values from Product A are cleared.
+    expect(el("items.0.description").value).toBe("");
+    expect(el("items.0.requested_sku").value).toBe("");
+    // Requester-entered and edited values are kept.
+    expect(el("items.0.requested_brand").value).toBe("Shure");
+    expect(el("items.0.color").value).toBe("Black");
+    expect(el("items.0.vendor_name").value).toBe("Sweetwater Sound");
+    expect(notice()).toContain(LOOKUP_MESSAGES.cleared);
+    // Only the edited previous-product value carries the warning.
+    expect(fieldNote(0, "vendor_name")).toContain(LOOKUP_MESSAGES.previousProduct);
+    expect(fieldNote(0, "requested_brand")).not.toContain(LOOKUP_MESSAGES.previousProduct);
+    expect(fieldNote(0, "color")).not.toContain(LOOKUP_MESSAGES.previousProduct);
+    expect(screen.queryAllByText("Filled")).toHaveLength(0);
+    // The old token / source attribution is gone.
+    fillRequester();
+    change("items.0.description", "Copy paper");
+    change("items.0.estimated_unit_price", "79.99");
+    const items = await submitAndGetItems();
+    expect(items[0]).toMatchObject({ vendor_url: OFFICE_DEPOT, product_lookup: "", description: "Copy paper", requested_sku: "", vendor_name: "Sweetwater Sound" });
+  });
+
+  it("does not clear on each keystroke; typing back the same link restores the token and clears nothing", async () => {
+    renderForm();
+    await lookUpSweetwater();
+    change("items.0.vendor_url", `${SWEETWATER}x`);
+    expect(status()).toBe(LOOKUP_MESSAGES.linkChanged);
+    expect(el("items.0.description").value).toBe("Shure SM58 Cardioid Dynamic Vocal Microphone");
+    change("items.0.vendor_url", SWEETWATER);
+    fireEvent.blur(el("items.0.vendor_url"));
+    expect(el("items.0.description").value).toBe("Shure SM58 Cardioid Dynamic Vocal Microphone");
+    expect(notice()).toBe("");
+    fillRequester();
+    change("items.0.quantity", "1");
+    change("items.0.estimated_unit_price", "99");
+    const items = await submitAndGetItems();
+    expect(items[0].product_lookup).toMatch(/^v1\./);
+  });
+
+  it("treats the same link written differently (case, trailing #fragment) as the same product", async () => {
+    renderForm();
+    await lookUpSweetwater();
+    commitLink(0, `${SWEETWATER.replace("www.sweetwater.com", "WWW.Sweetwater.com")}#reviews`);
+    expect(el("items.0.description").value).toBe("Shure SM58 Cardioid Dynamic Vocal Microphone");
+    expect(notice()).toBe("");
+  });
+
+  it("a link change that was never committed is applied on Submit (e.g. Enter in the link field)", async () => {
+    renderForm();
+    await lookUpSweetwater();
+    fillRequester();
+    change("items.0.quantity", "1");
+    change("items.0.estimated_unit_price", "99");
+    change("items.0.vendor_url", OFFICE_DEPOT); // no blur
+    fireEvent.click(screen.getByRole("button", { name: "Submit requisition" }));
+    // The stale Sweetwater description was cleared, so the form asks for it instead of submitting Product A's data.
+    await waitFor(() => expect(el("items.0.description").value).toBe(""));
+    expect(submitExternalRequisition).not.toHaveBeenCalled();
+  });
+
+  it("Undo restores cleared values only into empty fields and never restores the token", async () => {
+    renderForm();
+    await lookUpSweetwater();
+    commitLink(0, OFFICE_DEPOT);
+    change("items.0.description", "Copy paper"); // typed since the clear
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(el("items.0.description").value).toBe("Copy paper"); // not overwritten
+    expect(el("items.0.requested_sku").value).toBe("SM58"); // restored into an empty field
+    expect(el("items.0.vendor_name").value).toBe("Sweetwater");
+    expect(notice()).toBe(LOOKUP_MESSAGES.restored);
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+    expect(fieldNote(0, "requested_sku")).toContain(LOOKUP_MESSAGES.previousProduct);
+    fillRequester();
+    change("items.0.estimated_unit_price", "79.99");
+    const items = await submitAndGetItems();
+    expect(items[0].product_lookup).toBe("");
+  });
+
+  it("a failed new lookup keeps the previous product's details cleared and says so", async () => {
+    renderForm();
+    await lookUpSweetwater();
+    getProductDetails.mockResolvedValueOnce(result({ outcome: "domain", domain: "officedepot.com", method: null, fields: {}, price: null, currency: null, token: null }));
+    change("items.0.vendor_url", OFFICE_DEPOT);
+    getDetails(); // paste + Get details, without leaving the field first
+    await waitFor(() => expect(status()).toBe(LOOKUP_MESSAGES.failed));
+    expect(el("items.0.description").value).toBe("");
+    expect(el("items.0.requested_sku").value).toBe("");
+    expect(el("items.0.vendor_name").value).toBe("officedepot.com"); // cleared, then refilled for the new link
+    expect(notice()).toContain(LOOKUP_MESSAGES.cleared);
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull(); // no mixing once a new lookup ran
+  });
+
+  it("a new lookup fills the fields cleared from the previous product", async () => {
+    renderForm();
+    await lookUpSweetwater();
+    getProductDetails.mockResolvedValueOnce(result({
+      outcome: "hints", domain: "officedepot.com", method: "url_hint", price: null, currency: null,
+      fields: { title: "Office Depot Brand Copier Paper Letter", sku: "273646", vendor_name: "Office Depot" },
+    }));
+    change("items.0.vendor_url", OFFICE_DEPOT);
+    getDetails();
+    await waitFor(() => expect(status()).toContain("Office Depot"));
+    expect(el("items.0.description").value).toBe("Office Depot Brand Copier Paper Letter");
+    expect(el("items.0.requested_sku").value).toBe("273646");
+    expect(el("items.0.vendor_name").value).toBe("Office Depot");
+    expect(notice()).toBe("");
+    expect(screen.getAllByText("Filled")).toHaveLength(3);
+  });
+
+  it("the previous-product warning stays on an edited field until the requester changes it again", async () => {
+    renderForm();
+    await lookUpSweetwater();
+    change("items.0.description", "SM58 microphone (black)");
+    commitLink(0, OFFICE_DEPOT);
+    expect(el("items.0.description").value).toBe("SM58 microphone (black)");
+    expect(notice()).toContain(LOOKUP_MESSAGES.cleared); // SKU and vendor were cleared
+    expect(fieldNote(0, "description")).toContain(LOOKUP_MESSAGES.previousProduct);
+    change("items.0.description", "Copy paper");
+    expect(fieldNote(0, "description")).not.toContain(LOOKUP_MESSAGES.previousProduct);
+  });
+
+  it("only edited fields kept: explains that some details came from the previous product", async () => {
+    getProductDetails.mockResolvedValueOnce(result({ outcome: "hints", domain: "sweetwater.com", method: "url_hint", price: null, currency: null, fields: { sku: "SM58" } }));
+    renderForm();
+    change("items.0.vendor_url", SWEETWATER);
+    getDetails();
+    await waitFor(() => expect(el("items.0.requested_sku").value).toBe("SM58"));
+    change("items.0.requested_sku", "SM58-LC");
+    commitLink(0, OFFICE_DEPOT);
+    expect(notice()).toBe(LOOKUP_MESSAGES.changedKept);
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  });
+
+  it("changing one line's link never affects another line", async () => {
+    renderForm();
+    fireEvent.click(screen.getByRole("button", { name: /Add Item/ }));
+    await lookUpSweetwater(0);
+    await lookUpSweetwater(1);
+    commitLink(0, OFFICE_DEPOT);
+    expect(el("items.0.description").value).toBe("");
+    expect(el("items.1.description").value).toBe("Shure SM58 Cardioid Dynamic Vocal Microphone");
+    expect(el("items.1.requested_sku").value).toBe("SM58");
+    expect(notice(1)).toBe("");
+    expect(status(1)).toContain("Sweetwater");
+  });
+
+  it("removing a line forgets its lookup without touching the others", async () => {
+    renderForm();
+    fireEvent.click(screen.getByRole("button", { name: /Add Item/ }));
+    await lookUpSweetwater(1);
+    fireEvent.click(screen.getAllByRole("button", { name: /Remove/ })[0]);
+    expect(el("items.0.description").value).toBe("Shure SM58 Cardioid Dynamic Vocal Microphone");
+    expect(status(0)).toContain("Sweetwater");
   });
 });
