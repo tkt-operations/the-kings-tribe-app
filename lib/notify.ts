@@ -100,11 +100,11 @@ async function financeRecipients(admin: ReturnType<typeof createSupabaseAdminCli
   ];
 }
 
-async function log(
+function log(
   admin: ReturnType<typeof createSupabaseAdminClient>,
   entry: { requisition_id: string | null; channel: "email" | "sms"; template: string; recipient: string; subject?: string; result: SendResult },
 ) {
-  await admin.from("notifications").insert({
+  return admin.from("notifications").insert({
     requisition_id: entry.requisition_id,
     channel: entry.channel,
     template: entry.template,
@@ -383,4 +383,32 @@ export function notifyReceiptReceived(requisitionId: string | null, info: { sour
       );
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// TEMPORARY — administrator email delivery self-test (lib/email/self-test.ts).
+// Remove with that file once the Resend delivery webhook has been verified.
+// ---------------------------------------------------------------------------
+
+export const DELIVERY_SELF_TEST = {
+  template: "delivery_self_test",
+  subject: "The Kings Tribe — Email Delivery Test",
+  body: "This is a controlled email delivery test for The Kings Tribe Operations notification system. No action is required.",
+} as const;
+
+/**
+ * Sends the fixed delivery-test email through the same renderer, Resend sender
+ * and `notifications` log as every application email, so the provider message
+ * id is stored and matched by the delivery webhook exactly as usual. Not linked
+ * to any requisition. One send, no retry. The caller decides the recipient.
+ */
+export async function sendDeliverySelfTestEmail(recipient: string, idempotencyKey: string): Promise<{ result: SendResult; logged: boolean }> {
+  const { admin, settings, churchLines, appUrl } = await context();
+  const rendered = renderEmail(
+    { preheader: DELIVERY_SELF_TEST.body, heading: "Email delivery test", paragraphs: [DELIVERY_SELF_TEST.body] },
+    { appUrl, churchName: settings.church_name, churchLines },
+  );
+  const result = await sendEmail({ to: [recipient], subject: DELIVERY_SELF_TEST.subject, html: rendered.html, text: rendered.text, idempotencyKey });
+  const { error } = await log(admin, { requisition_id: null, channel: "email", template: DELIVERY_SELF_TEST.template, recipient, subject: DELIVERY_SELF_TEST.subject, result });
+  return { result, logged: !error };
 }

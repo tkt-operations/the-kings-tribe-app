@@ -149,3 +149,16 @@ The unread count drives `navigator.setAppBadge` / `clearAppBadge`, from the app 
   5. Tap it: after sign-in if needed, you land on the requisition. Mark all as read clears the badge.
   6. "Turn off for this device" stops alerts. A denied permission still leaves the inbox working.
 - **Android (Chrome):** install the app (or use the browser), then repeat the same steps.
+
+## TEMPORARY: administrator email delivery self-test (remove after the Resend webhook check)
+- **What it is:** an "Email delivery test (temporary diagnostic)" card under Administration → Church settings. Only **administrators** see it, and only they can use it.
+- **What it sends:** one fixed email ("The Kings Tribe — Email Delivery Test") to the administrator's **own** profile email. The recipient comes from the server session; the browser sends no input at all.
+- **How it is tracked:** it goes out through the normal path (`renderEmail`, then `sendEmail`, then the `notifications` log), so the Resend message id is stored and the signed delivery webhook matches it like any other email. The row has `template = 'delivery_self_test'` and no requisition. The card shows the provider status of the latest test.
+- **What it writes:** one `notifications` row, plus a rate-limit counter. No requisition, status history, inbox notification, push, audit, receipt, PO or vendor-order change.
+- **Limits:** at most one per 10 minutes and three per day per administrator. Never retried automatically.
+- **To remove it,** delete:
+  - `app/(app)/admin/settings/email-test-actions.ts`
+  - `app/(app)/admin/settings/email-self-test.tsx`, and its use in `page.tsx`
+  - `lib/email/self-test.ts`
+  - `DELIVERY_SELF_TEST` / `sendDeliverySelfTestEmail` in `lib/notify.ts`
+  - the tests: `tests/unit/email-self-test.test.ts`, `tests/components/email-self-test.test.tsx`, and the self-test block in `tests/db/email-delivery.test.ts`
