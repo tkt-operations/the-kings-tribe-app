@@ -85,14 +85,21 @@ describe("notification tap: remembered destination", () => {
     expect(w.calls).toEqual([`remember ${PENDING_LINK_CACHE}`, `navigate /requisitions/${REQ}`, `postMessage /requisitions/${REQ}`]);
   });
 
-  it("the deep-link cache survives activation (its name starts with the worker version) and matches the app's constant", async () => {
-    expect(SOURCE).toMatch(/const VERSION = "tkt-v1";/);
-    expect(PENDING_LINK_CACHE).toBe("tkt-v1-deeplink");
+  it("the remembered destination survives a worker update (activate keeps it; old static caches go)", async () => {
+    expect(PENDING_LINK_CACHE).toBe("tkt-deeplink");
+    expect(SOURCE).toMatch(/const PENDING_LINK_CACHE = "tkt-deeplink";/);
     const w = loadWorker([]);
     await w.click(`/requisitions/${REQ}`);
-    w.store.set("old-v0-static", new Map());
+    w.store.set("tkt-v0-static", new Map());
+    w.store.set("tkt-v1-static", new Map());
     await w.activate();
-    expect([...w.store.keys()]).toEqual([PENDING_LINK_CACHE]);
+    expect([...w.store.keys()].sort()).toEqual([PENDING_LINK_CACHE, "tkt-v1-static"].sort());
+    expect(w.remembered()?.url).toBe(`/requisitions/${REQ}`);
+  });
+
+  it("a new worker activates immediately (skipWaiting) and takes over open pages (clients.claim)", () => {
+    expect(SOURCE).toMatch(/self\.skipWaiting\(\)/);
+    expect(SOURCE).toMatch(/self\.clients\.claim\(\)/);
   });
 });
 

@@ -7,9 +7,9 @@
  */
 import { routerMock } from "./setup";
 import { render, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  PENDING_LINK_CACHE, PENDING_LINK_KEY, PENDING_LINK_MAX_AGE_MS, ServiceWorkerRegistration, takePendingNotificationLink,
+  PENDING_LINK_CACHE, PENDING_LINK_KEY, PENDING_LINK_MAX_AGE_MS, SW_UPDATE_INTERVAL_MS, ServiceWorkerRegistration, takePendingNotificationLink,
 } from "@/components/pwa/service-worker-registration";
 
 const REQ = "0b6f0f9e-1c2d-4e3f-8a9b-0c1d2e3f4a5b";
@@ -95,5 +95,56 @@ describe("ServiceWorkerRegistration", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(routerMock.push).not.toHaveBeenCalled();
     expect(store.has(PENDING_LINK_KEY)).toBe(true);
+  });
+
+  it("follows a destination stored just AFTER the app appeared (iOS ordering), only once", async () => {
+    render(<ServiceWorkerRegistration />);
+    await new Promise((r) => setTimeout(r, 100));
+    remember(`/requisitions/${REQ}`); // the worker's notificationclick runs after the app is already visible
+    await waitFor(() => expect(routerMock.push).toHaveBeenCalledWith(`/requisitions/${REQ}`), { timeout: 3000 });
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(routerMock.push).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("service worker updates", () => {
+  afterEach(() => { vi.unstubAllEnvs(); delete (navigator as { serviceWorker?: unknown }).serviceWorker; });
+  function fakeContainer() {
+    const update = vi.fn(async () => undefined);
+    const container = {
+      register: vi.fn(async () => ({ update })),
+      getRegistration: vi.fn(async () => ({ update })),
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), startMessages: vi.fn(),
+    };
+    Object.defineProperty(navigator, "serviceWorker", { value: container, configurable: true });
+    return { container, update };
+  }
+
+  it("checks for a newer worker on start and when the app returns to the foreground (throttled), without reloading", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const { container, update } = fakeContainer();
+    const now = vi.spyOn(Date, "now");
+    let t = 1_000_000;
+    now.mockImplementation(() => t);
+    render(<ServiceWorkerRegistration />);
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    expect(container.register).toHaveBeenCalledWith("/sw.js", { scope: "/" });
+    document.dispatchEvent(new Event("visibilitychange")); // too soon: throttled
+    await new Promise((r) => setTimeout(r, 10));
+    expect(update).toHaveBeenCalledTimes(1);
+    t += SW_UPDATE_INTERVAL_MS + 1;
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+    now.mockRestore();
+    // No reload anywhere in the update path (no reload loops).
+    const { readFileSync } = await import("node:fs");
+    expect(readFileSync("components/pwa/service-worker-registration.tsx", "utf8")).not.toMatch(/location\.reload|\.reload\(/);
+  });
+
+  it("re-checks for a remembered destination when the new worker takes control", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const { container } = fakeContainer();
+    render(<ServiceWorkerRegistration />);
+    await waitFor(() => expect(container.addEventListener).toHaveBeenCalledWith("controllerchange", expect.any(Function)));
   });
 });
