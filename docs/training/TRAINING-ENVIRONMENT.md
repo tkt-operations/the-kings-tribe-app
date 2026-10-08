@@ -19,12 +19,29 @@ When the variable is absent or anything else, production rendering and behavior 
 2. The app refuses the production project in training mode.
 3. `scripts/training/training-db.sh` refuses the production ref, `--linked`, `--project-ref` and `--local`, and any database it can't verify. Writes need the training ref typed at a prompt. It never prints passwords or connection strings.
 4. Every training SQL file aborts unless the church name contains "TRAINING".
+5. `scripts/training/run-training.sh` starts the local app with only the verified training values (see below).
 
 ## ⚠️ Supabase CLI danger
 This repository's Supabase CLI is **linked to PRODUCTION**. **Never use `--linked` for training work.** Use only the wrapper:
 ```
 scripts/training/training-db.sh check | status | verify | migrate [--dry-run] | seed [scenario] | reset <scenario|all>
 ```
+
+## Running the training app locally
+From the repository root:
+```
+scripts/training/run-training.sh
+```
+It starts the normal `next dev` server and prints only `Starting TKT Training locally at http://localhost:3000`. Stop it with Ctrl-C. To verify the configuration without starting anything, run `scripts/training/run-training.sh --check`.
+
+Next.js never reads `.env.training.local` by itself, and it fills any missing variable from `.env.local`, `.env.development(.local)` or `.env`. The launcher therefore:
+- reads `.env.training.local` as text (never executes it) and requires `NEXT_PUBLIC_APP_ENVIRONMENT=training`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `NEXT_PUBLIC_APP_URL`, `SETUP_TOKEN` and `TRAINING_PROJECT_REF`;
+- refuses the production project ref anywhere in the file, a Supabase URL whose project isn't `TRAINING_PROJECT_REF`, legacy keys for another project, and a non-local `NEXT_PUBLIC_APP_URL`;
+- refuses email, delivery-webhook, phone-alert and SMS variables in the file;
+- starts Next.js with a cleared environment: the six app values above, and every other application variable (including any name found in a local `.env` file) set to blank, so nothing from production can be picked up. It also tells Next.js not to read `.env` files. `TRAINING_DB_URL` never reaches the app;
+- never prints a value.
+
+Don't rename `.env.training.local` to `.env.local`.
 
 ## Environment variables
 Template: `.env.training.example`. Local values go in `.env.training.local` (git-ignored). Values come only from the TRAINING project and are never pasted into chat.
