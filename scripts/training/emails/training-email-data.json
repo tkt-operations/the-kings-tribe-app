@@ -1,0 +1,376 @@
+{
+ "appUrl": "http://localhost:3000",
+ "settings": {
+  "church_name": "The Kings Tribe (TRAINING)",
+  "currency_code": "USD",
+  "timezone": "America/New_York",
+  "requisition_policy": "Submit purchase requests 3–7 days before funds/items are needed whenever practical. Itemized receipts must be submitted for completed purchases.",
+  "po_instructions": "Present this Purchase Order to the vendor. Retain the itemized receipt or invoice for every purchase and reply to the Purchase Order email with a photo or PDF of each receipt.",
+  "churchLines": [
+   "1234 Training Way",
+   "Suite 100",
+   "Dallas, TX 75001",
+   "USA",
+   "2145550100",
+   "training@demo.invalid"
+  ]
+ },
+ "submitted": {
+  "id": "0439b4e7-a17e-4304-858d-0c397f568e7b",
+  "requisition_number": "TKT-REQ-2026-0034",
+  "status": "submitted",
+  "requester_name": "Jamie Carter",
+  "requester_email": "jamie.carter@demo.invalid",
+  "submitted_at": "2026-10-02T15:19:00+00:00",
+  "needed_by": "2026-10-16",
+  "estimated_total": 671.84,
+  "approved_total": "0.00",
+  "actual_total": 0,
+  "review_comment": "Approved the bins and some markers; the TV is not in this term's budget.",
+  "departments": {
+   "name": "Children's Ministry Team"
+  },
+  "department_subcategories": {
+   "name": "Classroom Supplies"
+  },
+  "request_types": {
+   "name": "Order",
+   "workflow": "church_order"
+  },
+  "requisition_items": [
+   {
+    "priority": "high",
+    "quantity": 6,
+    "description": "Classroom storage bins",
+    "line_number": 1,
+    "review_status": "approved",
+    "approved_total": 77.94,
+    "review_comment": null,
+    "estimated_total": 77.94,
+    "approved_quantity": 6,
+    "essential_justification": null
+   },
+   {
+    "priority": "medium",
+    "quantity": 10,
+    "description": "Dry-erase markers (12 pack)",
+    "line_number": 2,
+    "review_status": "approved",
+    "approved_total": 37.96,
+    "review_comment": "Four packs cover this term; we have spares in the supply closet.",
+    "estimated_total": 94.9,
+    "approved_quantity": 4,
+    "essential_justification": null
+   },
+   {
+    "priority": "low",
+    "quantity": 1,
+    "description": "Wall-mounted TV for the kids room",
+    "line_number": 3,
+    "review_status": "rejected",
+    "approved_total": 0,
+    "review_comment": "A TV is outside this term's classroom budget. Please resubmit next quarter.",
+    "estimated_total": 499,
+    "approved_quantity": null,
+    "essential_justification": null
+   }
+  ],
+  "department": "Children's Ministry Team",
+  "subcategory": "Classroom Supplies",
+  "requestType": "Order",
+  "workflow": "church_order",
+  "items": [
+   {
+    "priority": "high",
+    "quantity": 6,
+    "description": "Classroom storage bins",
+    "line_number": 1,
+    "review_status": "pending",
+    "approved_total": "0.00",
+    "review_comment": null,
+    "estimated_total": 77.94,
+    "approved_quantity": null,
+    "essential_justification": null
+   },
+   {
+    "priority": "medium",
+    "quantity": 10,
+    "description": "Dry-erase markers (12 pack)",
+    "line_number": 2,
+    "review_status": "pending",
+    "approved_total": "0.00",
+    "review_comment": null,
+    "estimated_total": 94.9,
+    "approved_quantity": null,
+    "essential_justification": null
+   },
+   {
+    "priority": "low",
+    "quantity": 1,
+    "description": "Wall-mounted TV for the kids room",
+    "line_number": 3,
+    "review_status": "pending",
+    "approved_total": "0.00",
+    "review_comment": null,
+    "estimated_total": 499,
+    "approved_quantity": null,
+    "essential_justification": null
+   }
+  ]
+ },
+ "partial": {
+  "id": "0439b4e7-a17e-4304-858d-0c397f568e7b",
+  "requisition_number": "TKT-REQ-2026-0034",
+  "status": "partially_approved",
+  "requester_name": "Jamie Carter",
+  "requester_email": "jamie.carter@demo.invalid",
+  "submitted_at": "2026-10-02T15:19:00+00:00",
+  "needed_by": "2026-10-16",
+  "estimated_total": 671.84,
+  "approved_total": 115.9,
+  "actual_total": 0,
+  "review_comment": "Approved the bins and some markers; the TV is not in this term's budget.",
+  "departments": {
+   "name": "Children's Ministry Team"
+  },
+  "department_subcategories": {
+   "name": "Classroom Supplies"
+  },
+  "request_types": {
+   "name": "Order",
+   "workflow": "church_order"
+  },
+  "requisition_items": [
+   {
+    "priority": "high",
+    "quantity": 6,
+    "description": "Classroom storage bins",
+    "line_number": 1,
+    "review_status": "approved",
+    "approved_total": 77.94,
+    "review_comment": null,
+    "estimated_total": 77.94,
+    "approved_quantity": 6,
+    "essential_justification": null
+   },
+   {
+    "priority": "medium",
+    "quantity": 10,
+    "description": "Dry-erase markers (12 pack)",
+    "line_number": 2,
+    "review_status": "approved",
+    "approved_total": 37.96,
+    "review_comment": "Four packs cover this term; we have spares in the supply closet.",
+    "estimated_total": 94.9,
+    "approved_quantity": 4,
+    "essential_justification": null
+   },
+   {
+    "priority": "low",
+    "quantity": 1,
+    "description": "Wall-mounted TV for the kids room",
+    "line_number": 3,
+    "review_status": "rejected",
+    "approved_total": 0,
+    "review_comment": "A TV is outside this term's classroom budget. Please resubmit next quarter.",
+    "estimated_total": 499,
+    "approved_quantity": null,
+    "essential_justification": null
+   }
+  ],
+  "department": "Children's Ministry Team",
+  "subcategory": "Classroom Supplies",
+  "requestType": "Order",
+  "workflow": "church_order",
+  "items": [
+   {
+    "priority": "high",
+    "quantity": 6,
+    "description": "Classroom storage bins",
+    "line_number": 1,
+    "review_status": "approved",
+    "approved_total": 77.94,
+    "review_comment": null,
+    "estimated_total": 77.94,
+    "approved_quantity": 6,
+    "essential_justification": null
+   },
+   {
+    "priority": "medium",
+    "quantity": 10,
+    "description": "Dry-erase markers (12 pack)",
+    "line_number": 2,
+    "review_status": "approved",
+    "approved_total": 37.96,
+    "review_comment": "Four packs cover this term; we have spares in the supply closet.",
+    "estimated_total": 94.9,
+    "approved_quantity": 4,
+    "essential_justification": null
+   },
+   {
+    "priority": "low",
+    "quantity": 1,
+    "description": "Wall-mounted TV for the kids room",
+    "line_number": 3,
+    "review_status": "rejected",
+    "approved_total": 0,
+    "review_comment": "A TV is outside this term's classroom budget. Please resubmit next quarter.",
+    "estimated_total": 499,
+    "approved_quantity": null,
+    "essential_justification": null
+   }
+  ]
+ },
+ "po": {
+  "req": {
+   "id": "6a639cf9-e83b-43c7-9784-ec34f63cfab9",
+   "requisition_number": "TKT-REQ-2026-0027",
+   "status": "po_issued",
+   "requester_name": "Jamie Carter",
+   "requester_email": "jamie.carter@demo.invalid",
+   "submitted_at": "2026-10-03T15:10:00+00:00",
+   "needed_by": "2026-10-17",
+   "estimated_total": 138.96,
+   "approved_total": 138.96,
+   "actual_total": 0,
+   "review_comment": null,
+   "departments": {
+    "name": "Production Team"
+   },
+   "department_subcategories": {
+    "name": "Live Sound"
+   },
+   "request_types": {
+    "name": "Order",
+    "workflow": "church_order"
+   },
+   "requisition_items": [
+    {
+     "priority": "high",
+     "quantity": 6,
+     "description": "XLR cable 25 ft",
+     "line_number": 1,
+     "review_status": "approved",
+     "approved_total": 111,
+     "review_comment": null,
+     "estimated_total": 111,
+     "approved_quantity": 6,
+     "essential_justification": null
+    },
+    {
+     "priority": "low",
+     "quantity": 4,
+     "description": "Microphone clip",
+     "line_number": 2,
+     "review_status": "approved",
+     "approved_total": 27.96,
+     "review_comment": null,
+     "estimated_total": 27.96,
+     "approved_quantity": 4,
+     "essential_justification": null
+    }
+   ],
+   "department": "Production Team",
+   "subcategory": "Live Sound",
+   "requestType": "Order",
+   "workflow": "church_order",
+   "items": [
+    {
+     "priority": "high",
+     "quantity": 6,
+     "description": "XLR cable 25 ft",
+     "line_number": 1,
+     "review_status": "approved",
+     "approved_total": 111,
+     "review_comment": null,
+     "estimated_total": 111,
+     "approved_quantity": 6,
+     "essential_justification": null
+    },
+    {
+     "priority": "low",
+     "quantity": 4,
+     "description": "Microphone clip",
+     "line_number": 2,
+     "review_status": "approved",
+     "approved_total": 27.96,
+     "review_comment": null,
+     "estimated_total": 27.96,
+     "approved_quantity": 4,
+     "essential_justification": null
+    }
+   ]
+  },
+  "po_number": "TKT-PO-2026-0011",
+  "total": 138.96,
+  "items": [
+   {
+    "quantity": 6,
+    "line_total": 111,
+    "description": "XLR cable 25 ft",
+    "line_number": 1
+   },
+   {
+    "quantity": 4,
+    "line_total": 27.96,
+    "description": "Microphone clip",
+    "line_number": 2
+   }
+  ]
+ },
+ "purchased": {
+  "id": "13e0fbc6-f4a2-4a1b-9b5f-ef0ae0e50055",
+  "requisition_number": "TKT-REQ-2026-0031",
+  "status": "purchased",
+  "requester_name": "Jamie Carter",
+  "requester_email": "jamie.carter@demo.invalid",
+  "submitted_at": "2026-09-25T15:20:00+00:00",
+  "needed_by": "2026-10-09",
+  "estimated_total": 49.98,
+  "approved_total": 49.98,
+  "actual_total": 49.98,
+  "review_comment": null,
+  "departments": {
+   "name": "Production Team"
+  },
+  "department_subcategories": {
+   "name": "Video Production"
+  },
+  "request_types": {
+   "name": "Order",
+   "workflow": "church_order"
+  },
+  "requisition_items": [
+   {
+    "priority": "medium",
+    "quantity": 2,
+    "description": "HDMI cable 25 ft",
+    "line_number": 1,
+    "review_status": "approved",
+    "approved_total": 49.98,
+    "review_comment": null,
+    "estimated_total": 49.98,
+    "approved_quantity": 2,
+    "essential_justification": null
+   }
+  ],
+  "department": "Production Team",
+  "subcategory": "Video Production",
+  "requestType": "Order",
+  "workflow": "church_order",
+  "items": [
+   {
+    "priority": "medium",
+    "quantity": 2,
+    "description": "HDMI cable 25 ft",
+    "line_number": 1,
+    "review_status": "approved",
+    "approved_total": 49.98,
+    "review_comment": null,
+    "estimated_total": 49.98,
+    "approved_quantity": 2,
+    "essential_justification": null
+   }
+  ]
+ }
+}

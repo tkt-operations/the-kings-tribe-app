@@ -72,6 +72,11 @@ Template: `.env.training.example`. Local values go in `.env.training.local` (git
 
 Passwords are kept in a password manager, never in the repo.
 
+## Capture fixtures (prepared in the app, not by the seed)
+- **S39 user states:** *Jordan Hayes* (`jordan.hayes@training.invalid`, Viewer) — invited with copy-link delivery and never accepted, so it shows **Invitation pending**; *Drew Santos* (`drew.santos@training.invalid`, Finance User) — a former team member, **Deactivated**. Both were created as Morgan in Admin → Users; no invitation email was sent.
+- **Requester walkthrough link:** "Training Requester Walkthrough" (all departments, 14 days, 10 submissions) for S41, S42, S46–S53, S55, S56 and M5. Its address is stored only in the git-ignored `.env.training.capture.local` (`TRAINING_REQUEST_LINK`) for capture automation; never share it, and revoke it after the capture sessions.
+- **Sample receipts and requester emails:** see `docs/training/assets/README.md`.
+
 ## Dates in the seeded history
 Every seeded requisition has one consistent timeline: submission and certification on a weekday morning the chosen number of days ago, then review, Purchase Order, order, receipt, purchase and close each a plausible number of hours later, in order, and never later than the present. The status history, POs, vendor orders, receipts and in-app notifications all follow it, and needed-by is two weeks after submission (so older requests have past needed-by dates). The one exception is the **Audit log**: it is append-only by design, so its entries keep the real time the seed ran. Avoid presenting audit-log times as historical in screenshots and video.
 

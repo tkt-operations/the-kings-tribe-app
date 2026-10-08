@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sample receipt — training only</title>
+<style>
+  @page { size: 4in 7.2in; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #ffffff; }
+  body { font: 13px/1.45 "Courier New", Courier, monospace; color: #1d1d1d; }
+  .receipt { position: relative; width: 4in; min-height: 7.2in; padding: 0.3in 0.32in; overflow: hidden; }
+  .banner { border: 3px solid #c0262d; color: #c0262d; text-align: center; font: bold 13px/1.3 Arial, sans-serif; letter-spacing: .06em; padding: 6px 4px; margin-bottom: 14px; }
+  .watermark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+  .watermark span { transform: rotate(-32deg); font: bold 30px/1.1 Arial, sans-serif; color: rgba(192, 38, 45, .16); text-align: center; letter-spacing: .05em; white-space: nowrap; }
+  h1 { font: bold 18px/1.2 Arial, sans-serif; text-align: center; margin: 0; }
+  .center { text-align: center; }
+  .muted { color: #555; }
+  hr { border: 0; border-top: 1px dashed #777; margin: 10px 0; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 2px 0; vertical-align: top; }
+  td.r { text-align: right; white-space: nowrap; padding-left: 8px; }
+  .total td { font-weight: bold; font-size: 15px; padding-top: 6px; }
+</style>
+</head>
+<body>
+  <div class="receipt">
+    <div class="watermark"><span>SAMPLE — TRAINING<br>NOT A REAL RECEIPT</span></div>
+    <div class="banner">SAMPLE — TRAINING — NOT A REAL RECEIPT</div>
+    <h1>Fictional Example Supplies</h1>
+    <p class="center muted" style="margin:4px 0 0">Training sample only · no real store<br>100 Sample Street, Example City<br>Tel 555-0100</p>
+    <hr>
+    <table>
+      <tr><td>Date</td><td class="r">10/03/2026 10:42 AM</td></tr>
+      <tr><td>Receipt #</td><td class="r">SAMPLE-TRN-0001</td></tr>
+      <tr><td>Register</td><td class="r">TRAINING-01</td></tr>
+    </table>
+    <hr>
+    <table>
+      <tr><td>Coffee filters (200 ct)<br><span class="muted">2 @ 6.49</span></td><td class="r">12.98</td></tr>
+      <tr><td>Paper napkins (500 ct)<br><span class="muted">1 @ 8.75</span></td><td class="r">8.75</td></tr>
+      <tr><td>Creamer cups (pack of 50)<br><span class="muted">2 @ 7.20</span></td><td class="r">14.40</td></tr>
+      <tr><td>Stir sticks (1000 ct)<br><span class="muted">1 @ 4.99</span></td><td class="r">4.99</td></tr>
+    </table>
+    <hr>
+    <table>
+      <tr><td>Subtotal</td><td class="r">41.12</td></tr>
+      <tr><td>Sales tax (sample 8.25%)</td><td class="r">3.39</td></tr>
+      <tr class="total"><td>TOTAL</td><td class="r">$44.51</td></tr>
+      <tr><td>Paid</td><td class="r">Card ending 0000</td></tr>
+    </table>
+    <hr>
+    <p class="center" style="margin:8px 0 0">Thank you!<br><span class="muted">This document was created for The Kings Tribe training materials. It is not a receipt and has no monetary value.</span></p>
+    <div class="banner" style="margin:14px 0 0">SAMPLE — TRAINING — NOT A REAL RECEIPT</div>
+  </div>
+</body>
+</html>
