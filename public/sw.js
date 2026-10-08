@@ -23,7 +23,8 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => !k.startsWith(VERSION)).map((k) => caches.delete(k)))),
+    // Old static caches go; the remembered notification destination (PENDING_LINK_CACHE) is kept across updates.
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => !k.startsWith(VERSION) && k !== PENDING_LINK_CACHE).map((k) => caches.delete(k)))),
   );
   self.clients.claim();
 });
@@ -173,9 +174,9 @@ async function openFromNotification(path) {
 // launch can open at the start page instead of the requested path. So the tapped
 // destination is also remembered (path + time only, nothing sensitive) and the
 // app routes to it when it starts, resumes or changes page
-// (components/pwa/service-worker-registration.tsx). The cache name starts with
-// VERSION so "activate" keeps it.
-const PENDING_LINK_CACHE = `${VERSION}-deeplink`;
+// (components/pwa/service-worker-registration.tsx). The cache name is not
+// versioned and "activate" keeps it, so it survives a worker update.
+const PENDING_LINK_CACHE = "tkt-deeplink";
 const PENDING_LINK_KEY = "/__tkt/pending-notification-link";
 
 async function rememberDestination(path) {
