@@ -157,19 +157,44 @@ validate_scenario() {
   [[ "$1" =~ ^(all|[a-z0-9_]{1,60})$ ]] || die "invalid scenario name '$1'."
 }
 
-# Copies a training SQL file with the scenario filled in, and runs it.
-run_training_sql() {
-  local file="$1" scenario="$2" tmp status=0
+# `supabase db query` sends a file to Postgres as ONE prepared statement, which
+# cannot hold several commands. Each training SQL file is therefore wrapped,
+# unchanged and unsplit, as the body of a single statement:
+#     do $tkt_run_<random>$ begin execute $tkt_sql_<random>$ <file> $tkt_sql_<random>$; end $tkt_run_<random>$;
+# PL/pgSQL EXECUTE runs a multi-command string in the same session (so the
+# seed's pg_temp helpers stay available) and the whole file is atomic: any
+# error rolls all of it back. The random tags are checked not to occur in the file.
+wrap_sql_file() {
+  local src="$1" dest="$2" scenario="${3:-}" tag
+  tag="$(od -An -N8 -tx1 /dev/urandom | tr -d " \n")"
+  [ "${#tag}" -eq 16 ] || die "could not generate a quoting tag."
+  if grep -q "tkt_run_$tag\|tkt_sql_$tag" "$src"; then die "quoting tag collision; try again."; fi
+  {
+    printf 'do $tkt_run_%s$ begin execute $tkt_sql_%s$\n' "$tag" "$tag"
+    if [ -n "$scenario" ]; then sed "s/__TRAINING_SCENARIO__/$scenario/g" "$src"; else cat "$src"; fi
+    printf '\n$tkt_sql_%s$; end $tkt_run_%s$;\n' "$tag" "$tag"
+  } >"$dest"
+}
+
+# Runs a training SQL file (scenario filled in) as one statement.
+run_sql_file() {
+  local file="$1" scenario="${2:-}" tmp status=0
   tmp="$(mktemp "${TMPDIR:-/tmp}/tkt-training.XXXXXX")"
-  sed "s/__TRAINING_SCENARIO__/$scenario/g" "$TRAINING_SQL_DIR/$file" >"$tmp"
+  wrap_sql_file "$TRAINING_SQL_DIR/$file" "$tmp" "$scenario"
   supabase_cli db query -f "$tmp" || status=$?
   rm -f "$tmp"
-  [ "$status" -eq 0 ] || die "$file failed (exit $status). Check the output above."
+  return "$status"
+}
+
+run_training_sql() {
+  local status=0
+  run_sql_file "$1" "$2" || status=$?
+  [ "$status" -eq 0 ] || die "$1 failed (exit $status). Nothing from this file was applied; check the output above."
 }
 
 verify_guard() {
   echo "Checking the TRAINING church-name guard..."
-  supabase_cli db query -f "$TRAINING_SQL_DIR/guard.sql" || die "the training guard failed; nothing was changed."
+  run_sql_file guard.sql || die "the training guard failed; nothing was changed."
 }
 
 # --- 5. Commands --------------------------------------------------------------
