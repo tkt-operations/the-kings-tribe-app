@@ -121,7 +121,7 @@ export function PurchaseOrderDialog({ requisitionId, items, currency }: { requis
             <p className="text-sm">PO total <span className="tabular ml-2 font-serif text-2xl">{formatCents(total, currency)}</span></p>
             <div className="flex gap-2">
               <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-              <LoadingButton type="submit" variant="gold" pending={pending} pendingLabel="Issuing…">Issue & email PO</LoadingButton>
+              <LoadingButton type="submit" variant="gold" pending={pending} pendingLabel="Issuing…">Issue PO</LoadingButton>
             </div>
           </div>
         </form>

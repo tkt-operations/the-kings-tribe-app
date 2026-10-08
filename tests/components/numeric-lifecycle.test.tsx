@@ -4,7 +4,7 @@
  * from API-shaped rows (numeric columns as JS numbers) via the data boundary.
  */
 import "./setup";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/ui/toast";
@@ -70,7 +70,10 @@ describe("Purchase order / vendor order / reconciliation", () => {
     render(<ToastProvider><PurchaseOrderDialog requisitionId={REQ} items={models([approved])} currency="USD" /></ToastProvider>);
     fireEvent.click(screen.getByRole("button", { name: /Issue PO/ }));
     expect(screen.getByText("$1.00")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Issue & email PO/ }));
+    // The submit button promises no email: email may be unconfigured or fail (the result message says what happened).
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByRole("button", { name: /email/i })).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Issue PO" }));
     await waitFor(() => expect(calls.po).toBeTruthy());
     expect((calls.po[1] as { items: unknown[] }).items[0]).toMatchObject({ quantity: "1", unit_price: "1" });
   });
