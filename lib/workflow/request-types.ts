@@ -49,10 +49,16 @@ export interface TimelineFacts {
 
 export type StepState = "done" | "current" | "upcoming" | "stopped";
 
+/** Statuses that can only follow a review decision. "Start review" is optional, so
+ * a requisition approved, held or rejected straight from Submitted has still been reviewed. */
+const REVIEWED_STATUSES = ["under_review", "approved", "partially_approved", "rejected", "po_issued", "ordered", "partially_purchased", "purchased"];
+
 /** Decide the state of every step from what has actually happened. */
 export function timelineStates(steps: TimelineStep[], facts: TimelineFacts): StepState[] {
   const done = (key: string): boolean => {
     switch (key) {
+      case "under_review":
+        return REVIEWED_STATUSES.some((s) => facts.reachedStatuses.has(s));
       case "receipt_received":
         return facts.hasReceipt;
       case "disbursed":
@@ -65,10 +71,12 @@ export function timelineStates(steps: TimelineStep[], facts: TimelineFacts): Ste
         return facts.reachedStatuses.has(key);
     }
   };
-  if (facts.status === "rejected") {
+  // Rejected (including rejected and then closed): the workflow stopped at approval.
+  if (facts.status === "rejected" || (facts.reachedStatuses.has("rejected") && !done("approved"))) {
     return steps.map((s) => (done(s.key) ? "done" : s.key === "approved" ? "stopped" : "upcoming"));
   }
-  let currentAssigned = false;
+  // A closed requisition has no step in progress.
+  let currentAssigned = facts.status === "closed";
   return steps.map((s) => {
     if (done(s.key)) return "done";
     if (!currentAssigned) {
