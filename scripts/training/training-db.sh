@@ -16,6 +16,7 @@
 #   scripts/training/training-db.sh migrate               WRITE: apply migrations to the training DB
 #   scripts/training/training-db.sh seed [all|<scenario>] WRITE: load the training seed
 #   scripts/training/training-db.sh reset <all|<scenario>> DESTRUCTIVE: delete scenario data, then re-seed it
+#   scripts/training/training-db.sh remove-capture <TKT-REQ-YYYY-NNNN>  DESTRUCTIVE: remove one form-submitted capture requisition
 #   scripts/training/training-db.sh verify-audit          changes nothing: prove the audit log is append-only (test is rolled back)
 #   scripts/training/training-db.sh sanitize-audit        ONE-TIME DESTRUCTIVE: remove the 4 listed training audit rows
 #
@@ -238,6 +239,19 @@ case "$COMMAND" in
     verify_guard
     run_training_sql reset_scenarios.sql "$SCENARIO"
     run_training_sql seed_training.sql "$SCENARIO"
+    ;;
+  remove-capture)
+    [ "$#" -eq 1 ] || usage
+    [[ "$1" =~ ^TKT-REQ-[0-9]{4}-[0-9]{4}$ ]] || die "invalid requisition number '$1'."
+    confirm_write "DELETE capture requisition $1 (not a seeded scenario)"
+    verify_guard
+    tmp_rc="$(mktemp "${TMPDIR:-/tmp}/tkt-training.XXXXXX")"
+    sed "s/__CAPTURE_REQUISITION__/$1/g" "$TRAINING_SQL_DIR/remove_capture_requisition.sql" >"$tmp_rc.src"
+    wrap_sql_file "$tmp_rc.src" "$tmp_rc"
+    status_rc=0
+    supabase_cli db query -f "$tmp_rc" || status_rc=$?
+    rm -f "$tmp_rc" "$tmp_rc.src"
+    [ "$status_rc" -eq 0 ] || die "remove_capture_requisition.sql failed (exit $status_rc). Nothing was removed."
     ;;
   verify-audit)
     [ "$#" -eq 0 ] || usage

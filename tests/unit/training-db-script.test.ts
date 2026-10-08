@@ -110,10 +110,16 @@ describe("training-db.sh", () => {
     expect(r.out).not.toContain(PASSWORD);
   });
 
-  it.each([["migrate"], ["seed"], ["seed", "review_take_1"], ["reset", "all"], ["sanitize-audit"]])("write command %s needs typed confirmation and refuses without a terminal", (...args) => {
+  it.each([["migrate"], ["seed"], ["seed", "review_take_1"], ["reset", "all"], ["sanitize-audit"], ["remove-capture", "TKT-REQ-2026-0041"]])("write command %s needs typed confirmation and refuses without a terminal", (...args) => {
     const r = run(args, envFile(good()));
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/needs interactive confirmation/);
+  });
+
+  it("rejects capture numbers that could inject SQL", () => {
+    const r = run(["remove-capture", "TKT-REQ-2026-0041'; drop table x; --"], envFile(good()));
+    expect(r.code).toBe(2);
+    expect(r.out).toMatch(/invalid requisition number/);
   });
 
   it("rejects scenario names that could inject SQL", () => {
