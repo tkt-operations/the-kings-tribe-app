@@ -83,3 +83,9 @@ export function formatDateTime(timestamp: string | null | undefined, timezone: s
 export function dateInTimezone(timestamp: string, timezone: string): string {
   return todayInTimezone(timezone, new Date(timestamp));
 }
+
+/** A timestamp's calendar date in the church timezone, formatted like formatDate. */
+export function formatTimestampDate(timestamp: string | null | undefined, timezone: string, style: "short" | "medium" | "long" = "medium"): string {
+  if (!timestamp || Number.isNaN(new Date(timestamp).getTime())) return "—";
+  return formatDate(dateInTimezone(timestamp, timezone), style);
+}

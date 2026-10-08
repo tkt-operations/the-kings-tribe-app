@@ -67,7 +67,7 @@ const listRow = (o: object) => ({ id: "1", requisition_number: "TKT-REQ-2026-000
 
 describe("requisition list priority", () => {
   it("table: wrapping indicator, all values present, relative scroll box", () => {
-    render(<RequisitionTable currency="USD" reviewerName={() => "Ayodeji Ejidiran"} rows={[listRow({}), listRow({ id: "2", highest_item_priority: "low", essential_item_count: 0 })] as never} />);
+    render(<RequisitionTable currency="USD" timezone="America/New_York" reviewerName={() => "Ayodeji Ejidiran"} rows={[listRow({}), listRow({ id: "2", highest_item_priority: "low", essential_item_count: 0 })] as never} />);
     const cells = screen.getAllByTestId("priority-cell");
     expect(cells[0].textContent).toContain("Contains Essential item");
     expect(cells[1].textContent).toContain("Highest priority");
