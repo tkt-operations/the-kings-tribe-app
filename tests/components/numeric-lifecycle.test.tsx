@@ -56,6 +56,9 @@ describe("Submitted requisition (Review)", () => {
   it("approves with numeric source data and sends strings to the server", async () => {
     render(<ToastProvider><ReviewDialog {...reviewProps} items={models([api({ quantity: 2.5, estimated_unit_price: 10.01 })])} /></ToastProvider>);
     fireEvent.click(screen.getByRole("button", { name: /Review/ }));
+    // Wording never promises the requester is notified (that depends on notification configuration).
+    expect(screen.getByText(/The decision is saved when you submit this review\. If requester notifications are configured, the requester may receive an update\./)).toBeTruthy();
+    expect(screen.queryByText(/The requester is notified of the outcome/)).toBeNull();
     expect(screen.getByText(/Requested 2.5 × \$10.01/)).toBeTruthy();
     expect(screen.getByText("$25.03")).toBeTruthy(); // approved total preview: 2.5 × 10.01 = 25.025 → 25.03
     fireEvent.click(screen.getByRole("button", { name: "Save decision" }));
