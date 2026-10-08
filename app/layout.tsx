@@ -1,20 +1,25 @@
 import type { Metadata, Viewport } from "next";
 import { dmSerif, satoshi } from "./fonts";
 import { ServiceWorkerRegistration } from "@/components/pwa/service-worker-registration";
+import { TrainingBanner } from "@/components/training/training-banner";
 import { ToastProvider } from "@/components/ui/toast";
+import { appIdentity } from "@/lib/app-identity";
+import { isTrainingMode } from "@/lib/training";
 import "./globals.css";
+
+const identity = appIdentity();
 
 export const metadata: Metadata = {
   title: {
-    default: "The Kings Tribe — Finance & Operations",
-    template: "%s · The Kings Tribe",
+    default: identity.title,
+    template: identity.titleTemplate,
   },
   description: "Finance, attendance and requisitions for The Kings Tribe.",
-  applicationName: "TKT Operations",
+  applicationName: identity.shortName,
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    title: "TKT Operations",
+    title: identity.shortName,
     statusBarStyle: "black-translucent",
   },
   icons: {
@@ -38,9 +43,11 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const training = isTrainingMode();
   return (
-    <html lang="en" className={`${satoshi.variable} ${dmSerif.variable}`}>
+    <html lang="en" className={`${satoshi.variable} ${dmSerif.variable}`} data-environment={training ? "training" : undefined}>
       <body className="min-h-dvh">
+        {training ? <TrainingBanner /> : null}
         <ToastProvider>{children}</ToastProvider>
         <ServiceWorkerRegistration />
       </body>

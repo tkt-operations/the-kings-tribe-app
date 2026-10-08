@@ -3,6 +3,7 @@ import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { publicEnv } from "@/lib/env";
 import { serverEnv } from "@/lib/server-env";
+import { assertTrainingDatabaseIsSafe } from "@/lib/training";
 
 /**
  * Service-role client. BYPASSES Row Level Security.
@@ -17,6 +18,7 @@ import { serverEnv } from "@/lib/server-env";
 export function createSupabaseAdminClient(): SupabaseClient {
   const { supabaseUrl } = publicEnv();
   const { supabaseSecretKey } = serverEnv();
+  assertTrainingDatabaseIsSafe(supabaseUrl);
   if (!supabaseUrl || !supabaseSecretKey) {
     throw new Error("Supabase server credentials are not configured (SUPABASE_SECRET_KEY).");
   }

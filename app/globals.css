@@ -44,6 +44,40 @@
   --safe-right: env(safe-area-inset-right, 0px);
 }
 
+/* Training environment only (data-environment is set by app/layout.tsx when
+   NEXT_PUBLIC_APP_ENVIRONMENT=training). Everything that already clears the
+   iPhone status bar with --safe-top also clears the banner. */
+:root[data-environment="training"] {
+  --training-banner-height: 1.75rem;
+  --safe-top: calc(env(safe-area-inset-top, 0px) + var(--training-banner-height));
+  scroll-padding-top: var(--safe-top);
+}
+
+.training-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 45; /* above the sticky header and bottom nav, below panels, dialogs and toasts */
+  height: var(--safe-top);
+  padding: env(safe-area-inset-top, 0px) calc(var(--safe-right) + 0.75rem) 0 calc(var(--safe-left) + 0.75rem);
+  /* Navy behind the iPhone status bar (white status text stays readable), gold strip below. */
+  background:
+    linear-gradient(var(--color-navy), var(--color-navy)) top / 100% env(safe-area-inset-top, 0px) no-repeat,
+    var(--color-gold);
+  color: var(--color-navy);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: var(--training-banner-height);
+  text-align: center;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;

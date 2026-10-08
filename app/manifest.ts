@@ -1,10 +1,12 @@
 import type { MetadataRoute } from "next";
+import { appIdentity } from "@/lib/app-identity";
 
 export default function manifest(): MetadataRoute.Manifest {
+  const identity = appIdentity();
   return {
     id: "/",
-    name: "The Kings Tribe — Finance & Operations",
-    short_name: "TKT Operations",
+    name: identity.name,
+    short_name: identity.shortName,
     description: "Sunday reporting, requisitions and purchasing for The Kings Tribe.",
     start_url: "/dashboard",
     scope: "/",

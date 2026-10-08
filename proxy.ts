@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { isPublicPath } from "@/lib/route-access";
+import { trainingDatabaseRefusal } from "@/lib/training";
 
 /**
  * Runs before every page request:
@@ -14,6 +15,10 @@ export async function proxy(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   const { pathname, search } = request.nextUrl;
+
+  // A training deployment pointed at the production database serves nothing (lib/training.ts).
+  const refusal = trainingDatabaseRefusal(url ?? "");
+  if (refusal) return new NextResponse(refusal, { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } });
 
   if (!url || !key) {
     // Not configured yet: only the setup page can explain what to do.

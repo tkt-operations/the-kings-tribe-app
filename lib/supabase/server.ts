@@ -3,6 +3,7 @@ import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { publicEnv } from "@/lib/env";
+import { assertTrainingDatabaseIsSafe } from "@/lib/training";
 
 /**
  * Request-scoped client acting AS THE SIGNED-IN USER. Row Level Security and
@@ -10,6 +11,7 @@ import { publicEnv } from "@/lib/env";
  */
 export async function createSupabaseServerClient() {
   const env = publicEnv();
+  assertTrainingDatabaseIsSafe(env.supabaseUrl);
   const cookieStore = await cookies();
   return createServerClient(env.supabaseUrl, env.supabasePublishableKey, {
     cookies: {
@@ -32,6 +34,7 @@ export async function createSupabaseServerClient() {
 /** Anonymous client (no session) for the public requisition form. */
 export function createSupabaseAnonClient() {
   const env = publicEnv();
+  assertTrainingDatabaseIsSafe(env.supabaseUrl);
   return createServerClient(env.supabaseUrl, env.supabasePublishableKey, {
     cookies: { getAll: () => [], setAll: () => {} },
     auth: { persistSession: false, autoRefreshToken: false },
