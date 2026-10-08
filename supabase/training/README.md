@@ -9,6 +9,8 @@ Run them only through `scripts/training/training-db.sh`, which verifies the trai
 |---|---|
 | `guard.sql` | Read-only. Fails unless the church name contains "TRAINING". |
 | `seed_training.sql` | Fictional, non-demo training scenarios created through the real workflow functions. Idempotent; aborts unless the guard passes. |
+| `verify_audit_protection.sql` | Proves the audit log is append-only: tries an ordinary delete and update in a rolled-back subtransaction (`training-db.sh verify-audit`). Changes nothing. |
+| `sanitize_training_audit.sql` | One-time cleanup, already applied: removed four specific training audit rows that held real-looking contact details (`training-db.sh sanitize-audit`). Refuses to run again. |
 | `reset_scenarios.sql` | Deletes one scenario (or `all`) so it can be re-seeded. Never deletes users, settings or the audit log. |
 
 Scenarios: `priority_mix`, `review_take_1..3`, `ready_for_po`, `ready_for_po_direct`, `ready_to_order`, `receipt_pending`, `partial_purchase`, `advance_due`, `ready_to_close`, `on_hold_example`, `rejected_example`, `partially_approved`, `history`, `sundays`.

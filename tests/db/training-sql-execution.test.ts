@@ -168,6 +168,26 @@ describe("training-db.sh seed and reset", () => {
   });
 });
 
+describe("training-db.sh sanitize-audit", () => {
+  it("after typed confirmation sends the guard, the one-statement cleanup, then the protection check", () => {
+    envFile();
+    const r = runWithTerminal(["sanitize-audit"]);
+    expect(r.code).toBe(0);
+    const calls = captured();
+    expect(calls).toHaveLength(3);
+    expect(calls[0].sql).toContain(readFileSync(path.join(SQL_DIR, "guard.sql"), "utf8"));
+    expect(calls[1].sql).toContain(readFileSync(path.join(SQL_DIR, "sanitize_training_audit.sql"), "utf8"));
+    expect(calls[2].sql).toContain(readFileSync(path.join(SQL_DIR, "verify_audit_protection.sql"), "utf8"));
+    for (const c of calls) expect(c.sql).toMatch(/^do \$tkt_run_([0-9a-f]{16})\$ begin execute \$tkt_sql_\1\$\n/);
+  });
+
+  it("a wrong typed confirmation sends nothing", () => {
+    envFile();
+    expect(runWithTerminal(["sanitize-audit"], "wrongwrongwrongwrong").code).toBe(2);
+    expect(captured()).toHaveLength(0);
+  });
+});
+
 describe("safeguards still hold with a terminal attached", () => {
   it("a wrong typed confirmation sends nothing", () => {
     envFile();

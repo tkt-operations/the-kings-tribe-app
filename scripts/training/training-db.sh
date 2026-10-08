@@ -16,6 +16,8 @@
 #   scripts/training/training-db.sh migrate               WRITE: apply migrations to the training DB
 #   scripts/training/training-db.sh seed [all|<scenario>] WRITE: load the training seed
 #   scripts/training/training-db.sh reset <all|<scenario>> DESTRUCTIVE: delete scenario data, then re-seed it
+#   scripts/training/training-db.sh verify-audit          changes nothing: prove the audit log is append-only (test is rolled back)
+#   scripts/training/training-db.sh sanitize-audit        ONE-TIME DESTRUCTIVE: remove the 4 listed training audit rows
 #
 # Safeguards (all fail closed):
 #   * values come only from .env.training.local (never .env.local), read as text, never executed
@@ -236,6 +238,18 @@ case "$COMMAND" in
     verify_guard
     run_training_sql reset_scenarios.sql "$SCENARIO"
     run_training_sql seed_training.sql "$SCENARIO"
+    ;;
+  verify-audit)
+    [ "$#" -eq 0 ] || usage
+    verify_guard
+    run_sql_file verify_audit_protection.sql || die "audit protection check failed."
+    ;;
+  sanitize-audit)
+    [ "$#" -eq 0 ] || usage
+    confirm_write "PERMANENTLY DELETE the listed training audit rows (one-time cleanup)"
+    verify_guard
+    run_training_sql sanitize_training_audit.sql ""
+    run_sql_file verify_audit_protection.sql || die "audit protection check failed after cleanup."
     ;;
   *)
     usage
