@@ -19,4 +19,4 @@ Not seeded: **Reimbursement**. The database requires a real uploaded receipt fil
 
 Prerequisite: active users Morgan Ellis (Administrator), Taylor Brooks (Head of Finance), Riley Chen (Finance User) and Sam Patel (Reporting User), created in the app with copy-link invitations. Tested locally in PGlite (`tests/db/training-seed.test.ts`, `tests/db/training-sql-execution.test.ts`) and seeded into the training project.
 
-**Dates in `history`:** the older requisitions have backdated **submission** dates (about 1–6 months ago), but their review, status-change and close timestamps are the time the seed ran. Screenshots and video should not present those review or close timestamps as historical. Historical lifecycle dates can be improved separately if Reports need them.
+**Dates:** after the workflow runs, `pg_temp.tkt_retime` gives each requisition a consistent timeline (submission → review → PO → order → receipt → purchase → close, in order, ending before now; needed-by two weeks after submission). Only the append-only audit log keeps the real seed time.

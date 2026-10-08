@@ -43,6 +43,12 @@ Next.js never reads `.env.training.local` by itself, and it fills any missing va
 
 Don't rename `.env.training.local` to `.env.local`.
 
+### For screenshots and video: capture mode
+```
+scripts/training/run-training-capture.sh
+```
+Same checks and clean environment as above, but it runs a **production build** (`next build`) and then `next start` — never the dev server — so no development tools (such as the Next.js "N" button) appear on screen. The training banner and the "TKT Training" name are part of the build. It prints `Building TKT Training in production mode (training values only)...`, then `Starting TKT Training (capture mode) locally at http://localhost:3000`. Stop the dev server first (both use port 3000). `--check` verifies without building. The build goes into `.next`, which is never committed or deployed (Vercel builds production itself).
+
 ## Environment variables
 Template: `.env.training.example`. Local values go in `.env.training.local` (git-ignored). Values come only from the TRAINING project and are never pasted into chat.
 
@@ -67,7 +73,7 @@ Template: `.env.training.example`. Local values go in `.env.training.local` (git
 Passwords are kept in a password manager, never in the repo.
 
 ## Dates in the seeded history
-The older requisitions (`history` scenario) have backdated submission dates, but their review and close timestamps are current (the time the seed ran). Screenshots and video should avoid implying those review or close timestamps are historical. Historical lifecycle dates can be improved separately if Reports need them.
+Every seeded requisition has one consistent timeline: submission and certification on a weekday morning the chosen number of days ago, then review, Purchase Order, order, receipt, purchase and close each a plausible number of hours later, in order, and never later than the present. The status history, POs, vendor orders, receipts and in-app notifications all follow it, and needed-by is two weeks after submission (so older requests have past needed-by dates). The one exception is the **Audit log**: it is append-only by design, so its entries keep the real time the seed ran. Avoid presenting audit-log times as historical in screenshots and video.
 
 ## Reset strategy
 - **Before each take:** `reset <scenario>`.

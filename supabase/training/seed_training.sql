@@ -38,6 +38,9 @@ create or replace function pg_temp.tkt_items(p_req uuid) returns uuid[] language
   select array_agg(id order by line_number) from public.requisition_items where requisition_id = p_req;
 $$;
 
+-- Requisitions created in this run and how many days ago each was submitted.
+create temporary table if not exists tkt_plan (requisition_id uuid primary key, days_ago int not null);
+
 -- Submits one request as the external requester Jamie Carter through a training link.
 create or replace function pg_temp.tkt_submit(
   p_token text, p_fingerprint text, p_type text, p_department text, p_subcategory text,
@@ -74,10 +77,101 @@ begin
     '[]'::jsonb,
     p_fingerprint
   ) ->> 'id')::uuid;
-  if p_days_ago > 0 then
-    update public.requisitions set submitted_at = now() - make_interval(days => p_days_ago) where id = v_req;
-  end if;
+  -- Dates are set afterwards by pg_temp.tkt_retime (see below), once the whole workflow has run.
+  insert into pg_temp.tkt_plan (requisition_id, days_ago) values (v_req, p_days_ago);
   return v_req;
+end $$;
+
+-- Gives one requisition an internally consistent, believable timeline.
+-- Everything the seed does happens inside one transaction, so every record it
+-- creates carries the same timestamp. This spreads them out: submission
+-- (and certification) about p_days_ago days ago on a weekday morning, then
+-- each later step a plausible number of hours after the one before, in
+-- workflow order. If the steps would run past the present, the whole
+-- timeline is compressed so it still ends before now. Needed-by is two weeks
+-- after submission. The append-only audit log keeps the real seed time.
+create or replace function pg_temp.tkt_retime(p_req uuid, p_days_ago int) returns void language plpgsql as $$
+declare
+  v_tz text := coalesce((select timezone from public.church_settings where id = 1), 'UTC');
+  v_end timestamptz := now() - interval '15 minutes';
+  v_t0 timestamptz;
+  v_span numeric;
+  v_f numeric;
+begin
+  -- Hours after submission at which each step happens (before any compression).
+  create temporary table if not exists tkt_step (key text primary key, hours numeric not null);
+  delete from pg_temp.tkt_step;
+  insert into pg_temp.tkt_step values
+    ('submitted', 0), ('under_review', 20), ('comment', 21), ('on_hold', 26), ('approved', 26), ('partially_approved', 26), ('rejected', 26),
+    ('disbursed', 46), ('po_issued', 45), ('ordered', 49), ('receipt', 96), ('partially_purchased', 120), ('purchased', 120), ('closed', 170);
+
+  select coalesce(max(st.hours), 0) into v_span
+    from public.requisition_status_history h join pg_temp.tkt_step st on st.key = h.to_status::text
+   where h.requisition_id = p_req;
+  if exists (select 1 from public.receipts where requisition_id = p_req) then v_span := greatest(v_span, 96); end if;
+
+  -- A weekday-morning submission p_days_ago days ago (varied a little per request).
+  v_t0 := (((now() at time zone v_tz)::date - p_days_ago)::timestamp + time '09:10'
+           + make_interval(mins => abs(hashtext(p_req::text)) % 150)) at time zone v_tz;
+  v_t0 := least(v_t0, v_end - make_interval(secs => 60 + (v_span * 60)::int));
+  v_f := case when v_span = 0 then 0 else least(1, extract(epoch from (v_end - v_t0)) / (v_span * 3600)) end;
+
+  create temporary table if not exists tkt_at (key text primary key, at timestamptz not null);
+  delete from pg_temp.tkt_at;
+  insert into pg_temp.tkt_at select key, v_t0 + make_interval(secs => (hours * v_f * 3600)::int) from pg_temp.tkt_step;
+
+  update public.requisition_status_history h set created_at = a.at
+    from pg_temp.tkt_at a where h.requisition_id = p_req and a.key = h.to_status::text;
+  update public.requisition_comments set created_at = (select at from pg_temp.tkt_at where key = 'comment') where requisition_id = p_req;
+  update public.purchase_orders set
+      created_at = (select at from pg_temp.tkt_at where key = 'po_issued'),
+      issued_at = (select at from pg_temp.tkt_at where key = 'po_issued'),
+      pdf_generated_at = case when pdf_generated_at is null then null else (select at from pg_temp.tkt_at where key = 'po_issued') end
+   where requisition_id = p_req;
+  update public.vendor_orders set
+      created_at = (select at from pg_temp.tkt_at where key = 'ordered'),
+      order_date = ((select at from pg_temp.tkt_at where key = 'ordered') at time zone v_tz)::date,
+      expected_delivery_date = ((select at from pg_temp.tkt_at where key = 'ordered') at time zone v_tz)::date + 5
+   where requisition_id = p_req;
+  update public.receipts set
+      created_at = (select at from pg_temp.tkt_at where key = 'receipt'),
+      purchase_date = ((select at from pg_temp.tkt_at where key = 'ordered') at time zone v_tz)::date + 1,
+      reconciled_at = case when reconciled_at is null then null else (select at from pg_temp.tkt_at where key = 'purchased') end
+   where requisition_id = p_req;
+  update public.receipt_item_allocations set created_at = (select at from pg_temp.tkt_at where key = 'purchased')
+   where receipt_id in (select id from public.receipts where requisition_id = p_req);
+  update public.disbursements set
+      created_at = (select at from pg_temp.tkt_at where key = 'disbursed'),
+      paid_on = ((select at from pg_temp.tkt_at where key = 'disbursed') at time zone v_tz)::date
+   where requisition_id = p_req;
+  -- In-app notifications take the time of the step that raised them.
+  update public.user_notifications n set created_at = a.at
+    from pg_temp.tkt_at a
+   where n.requisition_id = p_req
+     and a.key = case n.type
+       when 'requisition.submitted' then 'submitted'
+       when 'requisition.assigned' then 'under_review'
+       when 'requisition.approved' then 'approved'
+       when 'requisition.partially_approved' then 'partially_approved'
+       when 'requisition.on_hold' then 'on_hold'
+       when 'requisition.rejected' then 'rejected'
+       when 'purchase_order.issued' then 'po_issued'
+       when 'vendor_order.placed' then 'ordered'
+       when 'receipt.received' then 'receipt'
+       when 'requisition.purchased' then 'purchased'
+       when 'requisition.closed' then 'closed'
+     end;
+  update public.requisitions r set
+      created_at = v_t0,
+      submitted_at = v_t0,
+      certified_at = case when certified_at is null then null else v_t0 end,
+      needed_by = (v_t0 at time zone v_tz)::date + 14,
+      reviewed_at = case when reviewed_at is null then null else coalesce(
+        (select max(h.created_at) from public.requisition_status_history h
+          where h.requisition_id = p_req and h.to_status in ('approved', 'partially_approved', 'rejected', 'on_hold')), reviewed_at) end,
+      status_changed_at = coalesce((select max(h.created_at) from public.requisition_status_history h where h.requisition_id = p_req), v_t0),
+      closed_at = case when closed_at is null then null else (select at from pg_temp.tkt_at where key = 'closed') end
+   where r.id = p_req;
 end $$;
 
 create or replace function pg_temp.tkt_item(
@@ -185,6 +279,7 @@ begin
   values ('Training seed link (revoked)', encode(sha256(convert_to(v_token, 'UTF8')), 'hex'), left(v_token, 6), true, v_morgan)
   returning id into v_token_id;
 
+  delete from pg_temp.tkt_plan;
   foreach v_key in array v_scenarios loop
     continue when v_scenario <> 'all' and v_key <> v_scenario;
     continue when v_key <> 'sundays' and exists (
@@ -403,6 +498,10 @@ begin
         end if;
     end case;
   end loop;
+
+  -- Believable, internally consistent dates for every requisition created in this run.
+  perform pg_temp.tkt_retime(requisition_id, days_ago) from pg_temp.tkt_plan;
+  delete from pg_temp.tkt_plan;
 
   -- The seed link was only a vehicle for the requests above.
   perform pg_temp.tkt_as(v_morgan);

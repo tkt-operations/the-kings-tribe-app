@@ -219,3 +219,69 @@ describe("run-training.sh with a valid training configuration", () => {
     expect(r.out).not.toContain(TRAIN + ".supabase.co");
   });
 });
+
+describe("run-training-capture.sh (production build + next start, never the dev server)", () => {
+  const CAPTURE = path.join(process.cwd(), "scripts", "training", "run-training-capture.sh");
+  let callLog: string;
+  function fakeNpx(buildFails = false) {
+    callLog = path.join(dir, "npx-calls");
+    writeFileSync(path.join(dir, "npx"), `#!/bin/bash
+printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$*" "$NODE_ENV" "$NEXT_PUBLIC_APP_ENVIRONMENT" "$__NEXT_PROCESSED_ENV" "\${RESEND_API_KEY-unset}" >> "${callLog}"
+case "$*" in *"next build"*) exit ${buildFails ? 1 : 0} ;; esac
+exit 0
+`);
+    chmodSync(path.join(dir, "npx"), 0o755);
+  }
+  function runCapture(args: string[], file = path.join(dir, ".env.training.local"), extraEnv: Record<string, string> = {}) {
+    const result = spawnSync("bash", [CAPTURE, ...args], {
+      encoding: "utf8",
+      env: { PATH: `${dir}:${path.dirname(process.execPath)}:/usr/bin:/bin`, HOME: dir, TKT_TRAINING_ENV_FILE: file, TKT_TRAINING_APP_DIR: appDir, ...extraEnv } as unknown as NodeJS.ProcessEnv,
+      input: "",
+    });
+    return { code: result.status, out: `${result.stdout}${result.stderr}` };
+  }
+  const calls = () => (existsSync(callLog) ? readFileSync(callLog, "utf8").replace(/\n$/, "").split("\n").map((l) => l.split("\t")) : []);
+
+  it("builds in production mode with the training values, then starts next start — never next dev", () => {
+    fakeNpx();
+    const r = runCapture([], envFile(good()), { RESEND_API_KEY: "re_PRODUCTION_SHELL" });
+    expect(r.code).toBe(0);
+    expect(calls()).toEqual([
+      ["--no-install next build", "production", "training", "true", ""],
+      ["--no-install next start --port 3000", "production", "training", "true", ""],
+    ]);
+    expect(r.out).toContain("Building TKT Training in production mode (training values only)...");
+    expect(r.out).toContain("Starting TKT Training (capture mode) locally at http://localhost:3000");
+    expect(r.out).not.toMatch(/next dev/);
+    expectNoSecrets(r.out);
+  });
+
+  it("does not start the server when the build fails", () => {
+    fakeNpx(true);
+    const r = runCapture([], envFile(good()));
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/training production build failed; the server was not started/);
+    expect(calls().map((c) => c[0])).toEqual(["--no-install next build"]);
+  });
+
+  it.each([
+    ["a missing training file", undefined, /\.env\.training\.local not found/],
+    ["the production project", { NEXT_PUBLIC_SUPABASE_URL: `https://${PROD}.supabase.co` }, /PRODUCTION/],
+    ["a mismatched project ref", { TRAINING_PROJECT_REF: "zzzzzzzzzzzzzzzzzzzz" }, /different project than TRAINING_PROJECT_REF/],
+    ["training mode off", { NEXT_PUBLIC_APP_ENVIRONMENT: "production" }, /must be 'training'/],
+    ["a non-local address", { NEXT_PUBLIC_APP_URL: "https://ops.thekingstribe.org" }, /must be a local address/],
+  ])("refuses %s before building anything", (_label, over, message) => {
+    fakeNpx();
+    const r = runCapture([], over === undefined ? undefined : envFile(good(over)));
+    expect(r.code).toBe(2);
+    expect(r.out).toMatch(message);
+    expect(calls()).toHaveLength(0);
+  });
+
+  it("--check verifies without building; other arguments are refused", () => {
+    fakeNpx();
+    expect(runCapture(["--check"], envFile(good())).code).toBe(0);
+    expect(runCapture(["--dev"], envFile(good())).code).toBe(2);
+    expect(calls()).toHaveLength(0);
+  });
+});

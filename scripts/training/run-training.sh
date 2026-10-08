@@ -4,8 +4,10 @@
 # See docs/training/TRAINING-ENVIRONMENT.md.
 #
 # Usage (from the repository root):
-#   scripts/training/run-training.sh           verify .env.training.local, then start `next dev`
-#   scripts/training/run-training.sh --check   verify only; do not start the server
+#   scripts/training/run-training.sh             verify .env.training.local, then start `next dev`
+#   scripts/training/run-training.sh --check     verify only; do not start the server
+#   scripts/training/run-training.sh --capture   production build + `next start` (no dev tools on screen),
+#                                                 normally run as scripts/training/run-training-capture.sh
 #
 # Why a launcher: Next.js never reads .env.training.local by itself, and it
 # fills any variable missing from the process environment from .env.local,
@@ -49,10 +51,12 @@ die() {
 }
 
 CHECK_ONLY=0
+CAPTURE=0
 for arg in "$@"; do
   case "$arg" in
     --check) CHECK_ONLY=1 ;;
-    *) die "unknown argument '$arg'. Usage: scripts/training/run-training.sh [--check]" ;;
+    --capture) CAPTURE=1 ;;
+    *) die "unknown argument '$arg'. Usage: scripts/training/run-training.sh [--check] [--capture]" ;;
   esac
 done
 
@@ -160,8 +164,20 @@ for key in $BLANK; do export "$key="; done
 i=0
 for key in $PASSED_KEYS; do export "$key=${VALUES[$i]}"; i=$((i + 1)); done
 # Tells Next.js the environment is already loaded, so it skips the .env files entirely.
-export __NEXT_PROCESSED_ENV=true NODE_ENV=development
-
-echo "Starting TKT Training locally at $APP_URL"
+export __NEXT_PROCESSED_ENV=true
 cd "$APP_DIR"
+
+if [ "$CAPTURE" = 1 ]; then
+  # Capture mode: the same production build and server the live app uses, so
+  # no development tools appear on screen. NEXT_PUBLIC_* values (training
+  # mode, the training Supabase project) are fixed into this build.
+  export NODE_ENV=production
+  echo "Building TKT Training in production mode (training values only)..."
+  npx --no-install next build || { echo "REFUSED: the training production build failed; the server was not started." >&2; exit 1; }
+  echo "Starting TKT Training (capture mode) locally at $APP_URL"
+  exec npx --no-install next start --port "$PORT"
+fi
+
+export NODE_ENV=development
+echo "Starting TKT Training locally at $APP_URL"
 exec npx --no-install next dev --port "$PORT"

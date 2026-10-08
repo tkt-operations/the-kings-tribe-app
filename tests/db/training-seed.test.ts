@@ -97,6 +97,38 @@ describe("training seed and reset", () => {
     expect(rows.rows[0].reason).toMatch(/sanctuary receiver failed/);
   });
 
+  it("gives every requisition an internally consistent, believable timeline", async () => {
+    const one_ = async (sql: string) => Number((await one<{ n: string }>(db, `select count(*) as n from (${sql}) q`)).n);
+    // Submission, certification and creation agree; all in the past.
+    expect(await one_("select 1 from public.requisitions where submitted_at is distinct from created_at or certified_at is distinct from submitted_at or submitted_at > now()")).toBe(0);
+    // Needed-by is two weeks after submission (church timezone).
+    expect(await one_("select 1 from public.requisitions r, public.church_settings c where c.id = 1 and r.needed_by <> (r.submitted_at at time zone c.timezone)::date + 14")).toBe(0);
+    // The first status event is the submission; later events follow in workflow order and never pass now.
+    expect(await one_("select 1 from public.requisition_status_history h join public.requisitions r on r.id = h.requisition_id where h.from_status is null and h.created_at <> r.submitted_at")).toBe(0);
+    expect(await one_(`select 1 from public.requisition_status_history h join public.requisition_status_history g on g.requisition_id = h.requisition_id
+      where h.to_status::text = 'submitted' and g.to_status::text <> 'submitted' and g.created_at <= h.created_at`)).toBe(0);
+    expect(await one_("select 1 from public.requisition_status_history where created_at > now()")).toBe(0);
+    expect(await one_("select 1 from public.requisitions r where status_changed_at <> (select max(created_at) from public.requisition_status_history h where h.requisition_id = r.id)")).toBe(0);
+    expect(await one_("select 1 from public.requisitions r where closed_at is not null and closed_at <> status_changed_at")).toBe(0);
+    expect(await one_("select 1 from public.requisitions r where reviewed_at is not null and reviewed_at <= submitted_at")).toBe(0);
+    // Purchasing records follow the review, in order.
+    expect(await one_("select 1 from public.purchase_orders p join public.requisitions r on r.id = p.requisition_id where p.issued_at <= r.reviewed_at or p.issued_at > now()")).toBe(0);
+    expect(await one_("select 1 from public.vendor_orders v join public.purchase_orders p on p.requisition_id = v.requisition_id where v.created_at <= p.issued_at")).toBe(0);
+    expect(await one_("select 1 from public.receipts rc join public.vendor_orders v on v.requisition_id = rc.requisition_id where rc.created_at <= v.created_at or rc.created_at > now()")).toBe(0);
+    expect(await one_("select 1 from public.receipts where reconciled_at is not null and reconciled_at <= created_at")).toBe(0);
+    // Notifications fall within each request's lifetime.
+    expect(await one_("select 1 from public.user_notifications n join public.requisitions r on r.id = n.requisition_id where n.created_at < r.submitted_at or n.created_at > now()")).toBe(0);
+    // Older completed requests are genuinely historical, needed-by included.
+    const hist = await db.query<{ days: number; needed_past: boolean; closed_days: number | null }>(
+      `select extract(day from now() - submitted_at)::int as days, needed_by < private.church_today() as needed_past,
+              extract(day from now() - closed_at)::int as closed_days
+         from public.requisitions where submission_fingerprint like 'training:history:%' order by submitted_at`);
+    // Whole days elapsed depends on the time of day the seed runs, so allow one day either way.
+    [170, 140, 112, 84, 56, 30].forEach((d, i) => expect(Math.abs(hist.rows[i].days - d)).toBeLessThanOrEqual(1));
+    expect(hist.rows.every((r) => r.needed_past)).toBe(true);
+    expect(hist.rows.filter((r) => r.closed_days !== null).every((r) => r.closed_days! >= 20)).toBe(true);
+  });
+
   it("partially approves through the real review: one line in full, one reduced, one rejected", async () => {
     const r = await one<{ status: string; outcome: string; reviewer: string; type: string }>(db,
       "select r.status::text, r.review_outcome::text as outcome, r.reviewed_by::text as reviewer, t.key as type from public.requisitions r join public.request_types t on t.id = r.request_type_id where submission_fingerprint = 'training:partially_approved'");
