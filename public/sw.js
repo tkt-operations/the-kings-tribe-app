@@ -168,7 +168,27 @@ async function openFromNotification(path) {
   if (self.clients.openWindow) await self.clients.openWindow(target);
 }
 
+// iOS installed apps do not reliably follow the tap: WindowClient.navigate() may
+// not move the window, a message to a suspended page can be lost, and a cold
+// launch can open at the start page instead of the requested path. So the tapped
+// destination is also remembered (path + time only, nothing sensitive) and the
+// app routes to it when it starts, resumes or changes page
+// (components/pwa/service-worker-registration.tsx). The cache name starts with
+// VERSION so "activate" keeps it.
+const PENDING_LINK_CACHE = `${VERSION}-deeplink`;
+const PENDING_LINK_KEY = "/__tkt/pending-notification-link";
+
+async function rememberDestination(path) {
+  try {
+    const cache = await caches.open(PENDING_LINK_CACHE);
+    await cache.put(PENDING_LINK_KEY, new Response(JSON.stringify({ url: path, at: Date.now() }), { headers: { "Content-Type": "application/json" } }));
+  } catch {
+    // Best effort: the direct navigation below still runs.
+  }
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  event.waitUntil(openFromNotification(safePath(event.notification.data && event.notification.data.url)));
+  const path = safePath(event.notification.data && event.notification.data.url);
+  event.waitUntil(rememberDestination(path).then(() => openFromNotification(path)));
 });

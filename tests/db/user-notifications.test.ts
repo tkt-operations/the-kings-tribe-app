@@ -224,6 +224,8 @@ describe("purchasing flow (Order type)", () => {
     poId = po.id;
     expect(await recipients("purchase_order.issued", reqId)).toEqual(["admin", "head", "purchaser"]);
     expect((await rows("type = 'purchase_order.issued' and requisition_id = $1", [reqId]))[0].title).toBe("Purchase order issued — ready to order");
+    // Tapping it (in-app or as a phone alert) opens that requisition's detail page.
+    expect(new Set((await rows("type = 'purchase_order.issued' and requisition_id = $1", [reqId])).map((r) => r.link))).toEqual(new Set([`/requisitions/${reqId}`]));
   });
 
   it("vendor order placed → reconcilers minus the actor; cancelled → order recorders minus the actor", async () => {
