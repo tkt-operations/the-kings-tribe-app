@@ -147,4 +147,23 @@ describe("requisition form priority", () => {
     // Essential listed first; badges carry words for screen readers too.
     expect(Array.from(list.querySelectorAll("[data-priority]")).map((n) => n.textContent)).toEqual(["Priority: Essential", "Priority: Medium"]);
   });
+
+  it("dates the confirmation in the church timezone, not UTC (evening submission)", async () => {
+    // 10:30 PM Central on Monday Oct 5 is already Tuesday Oct 6 in UTC.
+    expect(ctx.timezone).toBe("America/Chicago");
+    submitExternalRequisition.mockResolvedValue({
+      ok: true,
+      data: {
+        requisition_number: "TKT-REQ-2026-0002", submitted_at: "2026-10-06T03:30:00Z", needed_by: "2026-10-12",
+        department_name: "Production Team", subcategory_name: "Audio Production", request_type_name: "Order", estimated_total: "160.00", status: "submitted",
+        items: [{ line_number: 1, description: "XLR cables", quantity: "4.00", estimated_total: "160.00", priority: "medium", essential_justification: null }],
+      },
+    });
+    window.scrollTo = vi.fn();
+    renderForm();
+    fillValid();
+    fireEvent.click(screen.getByRole("button", { name: "Submit requisition" }));
+    expect(await screen.findByText("Monday, October 5, 2026")).toBeTruthy();
+    expect(screen.queryByText("Tuesday, October 6, 2026")).toBeNull();
+  });
 });
