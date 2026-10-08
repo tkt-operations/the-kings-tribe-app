@@ -3,6 +3,7 @@ import { getSessionUser } from "@/lib/auth";
 import { groupByPeriod, type Period } from "@/lib/analytics";
 import { toCsv } from "@/lib/csv";
 import { loadRequisitionItemRows, loadRequisitionRows, loadServiceData } from "@/lib/data/reports";
+import { getChurchSettings } from "@/lib/data/settings";
 import { requisitionItemsCsv, requisitionsCsv } from "@/lib/report-csv";
 import { isIsoDate } from "@/lib/dates";
 import { centsToDecimal } from "@/lib/money";
@@ -42,10 +43,10 @@ export async function GET(request: NextRequest) {
     }
   } else if (type === "requisitions") {
     if (!user.permissions.has("requisitions.view")) return new NextResponse("Forbidden", { status: 403 });
-    csv = requisitionsCsv(await loadRequisitionRows(from, to));
+    csv = requisitionsCsv(await loadRequisitionRows(from, to), (await getChurchSettings())?.timezone ?? "UTC");
   } else if (type === "requisition-items") {
     if (!user.permissions.has("requisitions.view")) return new NextResponse("Forbidden", { status: 403 });
-    csv = requisitionItemsCsv(await loadRequisitionItemRows(from, to));
+    csv = requisitionItemsCsv(await loadRequisitionItemRows(from, to), (await getChurchSettings())?.timezone ?? "UTC");
   } else {
     return new NextResponse("Unknown report", { status: 400 });
   }
