@@ -7,7 +7,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { loadFormContext, FORM_TOKEN_PATTERN } from "@/lib/data/form-context";
 import { verifyFormStamp } from "@/lib/spam";
 import { buildRequisitionSchema, toDatabasePayload } from "@/lib/validation/requisition";
-import { notifyRequisitionSubmitted } from "@/lib/notify";
+import { notifyFinanceOfSubmission, notifyRequesterOfSubmission } from "@/lib/notify";
 import type { ActionResult } from "@/lib/action-result";
 import type { Priority } from "@/lib/priority";
 import { classifyLookup, lookupPayload } from "@/lib/product/lookup-token";
@@ -55,6 +55,8 @@ export interface SubmissionSummary {
   estimated_total: string;
   status: string;
   items: { line_number: number; description: string; quantity: string; estimated_total: string; priority: Priority; essential_justification: string | null }[];
+  /** True only when the confirmation email was accepted by the email provider. */
+  confirmation_emailed?: boolean;
 }
 
 export async function submitExternalRequisition(
@@ -119,7 +121,11 @@ export async function submitExternalRequisition(
     return { ok: false, error: error.code === "P0001" ? error.message : GENERIC };
   }
   const result = data as SubmissionSummary & { id: string };
-  after(() => notifyRequisitionSubmitted(result.id));
+  // The requester's confirmation email is awaited so the confirmation screen only
+  // says it was emailed when the provider actually accepted it (never on skipped
+  // or failed). Notification problems never affect the submission itself.
+  const confirmation = await notifyRequesterOfSubmission(result.id);
+  after(() => notifyFinanceOfSubmission(result.id));
   schedulePushDispatch();
   return {
     ok: true,
@@ -133,6 +139,7 @@ export async function submitExternalRequisition(
       estimated_total: result.estimated_total,
       status: result.status,
       items: result.items,
+      confirmation_emailed: confirmation === "sent",
     },
   };
 }
