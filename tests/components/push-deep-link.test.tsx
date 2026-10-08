@@ -22,6 +22,7 @@ beforeEach(() => {
       if (name !== PENDING_LINK_CACHE) throw new Error("unexpected cache");
       return {
         match: async (k: string) => (store.has(k) ? new Response(store.get(k)) : undefined),
+        put: async (k: string, r: Response) => { store.set(k, await r.text()); },
         delete: async (k: string) => store.delete(k),
       };
     },
@@ -146,5 +147,28 @@ describe("service worker updates", () => {
     const { container } = fakeContainer();
     render(<ServiceWorkerRegistration />);
     await waitFor(() => expect(container.addEventListener).toHaveBeenCalledWith("controllerchange", expect.any(Function)));
+  });
+});
+
+describe("training diagnostics panel", () => {
+  it("shows the worker build, last tap steps and app pickup without ids; only rendered in training mode", async () => {
+    const { PushDiagnostics } = await import("@/components/notifications/push-diagnostics");
+    store.set("/__tkt/diag-worker", JSON.stringify({ build: "2026-10-08.3", activatedAt: Date.now() }));
+    store.set("/__tkt/diag-last-tap", JSON.stringify({ build: "2026-10-08.3", at: Date.now(), page: "requisition detail", hadData: true, windows: 1, exact: false, navigate: "missing", messaged: true, opened: true }));
+    localStorage.setItem("tkt:diag-pickup", JSON.stringify({ at: Date.now(), result: "followed", page: "requisition detail" }));
+    const { findByText, container } = render(<PushDiagnostics />);
+    expect(await findByText(/Training diagnostics/)).toBeTruthy();
+    expect(container.textContent).toMatch(/2026-10-08\.3/);
+    expect(container.textContent).toMatch(/navigate missing · message true · openWindow true/);
+    expect(container.textContent).toMatch(/followed · requisition detail/);
+    expect(container.textContent).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}/);
+    const { readFileSync } = await import("node:fs");
+    expect(readFileSync("app/(app)/notifications/page.tsx", "utf8")).toMatch(/isTrainingMode\(\) \? <PushDiagnostics \/> : null/);
+  });
+
+  it("records the app's pickup result for a followed destination", async () => {
+    remember(`/requisitions/${REQ}`);
+    await takePendingNotificationLink("/dashboard");
+    expect(JSON.parse(localStorage.getItem("tkt:diag-pickup")!)).toMatchObject({ result: "followed", page: "requisition detail" });
   });
 });

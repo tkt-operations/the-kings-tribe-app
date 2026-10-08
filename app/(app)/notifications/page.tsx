@@ -6,6 +6,8 @@ import { getChurchSettings } from "@/lib/data/settings";
 import { listNotifications } from "@/lib/notifications/queries";
 import { FILTER_LABELS, isNotificationFilter, NOTIFICATION_FILTERS, type NotificationFilter } from "@/lib/notifications/types";
 import { PushSettings } from "@/components/notifications/push-settings";
+import { PushDiagnostics } from "@/components/notifications/push-diagnostics";
+import { isTrainingMode } from "@/lib/training";
 import { NotificationList } from "./notification-list";
 
 export const metadata = { title: "Notifications" };
@@ -37,6 +39,7 @@ export default async function NotificationsPage({ searchParams }: PageProps<"/no
     <>
       <PageHeader eyebrow="Inbox" title="Notifications" description="Activity that involves you. Needs Attention on the dashboard shows the work still waiting." />
       <PushSettings />
+      {isTrainingMode() ? <PushDiagnostics /> : null}
       <nav aria-label="Notification filters" className="-mx-1 mb-4 overflow-x-auto pb-1">
         <ul className="flex w-max gap-1.5 px-1">
           {NOTIFICATION_FILTERS.map((f) => (

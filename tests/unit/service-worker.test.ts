@@ -164,12 +164,12 @@ describe("service worker: notification click opens the exact destination", () =>
     ["navigate() unavailable (iOS installed app)", "missing" as const],
     ["navigate() refused (window not controlled by this worker)", "rejects" as const],
     ["navigate() resolves null", "null" as const],
-  ])("when %s, the app is told to route itself to the exact path, then focused", async (_label, mode) => {
+  ])("when %s, the app is told to route itself AND openWindow() is used (iOS), then focused", async (_label, mode) => {
     const w = loadWorker({ windows: [{ url: `${ORIGIN}/requisitions`, navigate: mode }] });
     await w.run("notificationclick", click(DETAIL));
     const expected = mode === "missing" ? [] : [`navigate ${DETAIL}`];
-    expect(w.calls).toEqual([...expected, `postMessage tkt:navigate ${DETAIL}`, "focus /requisitions"]);
-    expect(w.openWindow).not.toHaveBeenCalled();
+    expect(w.calls).toEqual([...expected, `postMessage tkt:navigate ${DETAIL}`, `openWindow ${DETAIL}`, "focus /requisitions"]);
+    expect(w.openWindow).toHaveBeenCalledTimes(1);
   });
 
   it("prefers the focused/visible app window and ignores other origins", async () => {

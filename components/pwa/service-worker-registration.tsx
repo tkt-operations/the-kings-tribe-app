@@ -31,12 +31,24 @@ export async function takePendingNotificationLink(pathname: string, now = Date.n
     if (!response) return null;
     await cache.delete(PENDING_LINK_KEY);
     const data = (await response.json().catch(() => null)) as { url?: unknown; at?: unknown } | null;
-    if (!data || typeof data.at !== "number" || now - data.at > PENDING_LINK_MAX_AGE_MS || data.at - now > 60_000) return null;
-    if (!isSafeNotificationLink(data.url) || data.url === pathname) return null;
-    return data.url;
+    if (!data || typeof data.at !== "number" || now - data.at > PENDING_LINK_MAX_AGE_MS || data.at - now > 60_000) return recordPickup("expired", null, now);
+    if (!isSafeNotificationLink(data.url)) return recordPickup("invalid", null, now);
+    if (data.url === pathname) return recordPickup("already on that page", data.url, now, null);
+    return recordPickup("followed", data.url, now);
   } catch {
     return null;
   }
+}
+
+/** Training diagnostics: what the app did with the last remembered destination (page type and time only). */
+export const PICKUP_DIAG_KEY = "tkt:diag-pickup";
+function recordPickup(result: string, url: string | null, now: number, follow: string | null = url): string | null {
+  try {
+    localStorage.setItem(PICKUP_DIAG_KEY, JSON.stringify({ at: now, result, page: url ? (url.startsWith("/requisitions/") ? "requisition detail" : url) : null }));
+  } catch {
+    // Storage can be unavailable; diagnostics are best effort.
+  }
+  return follow;
 }
 
 async function clearPendingNotificationLink() {

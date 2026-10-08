@@ -57,7 +57,7 @@ describe("notification tap: remembered destination", () => {
     const w = loadWorker([{ url: `${ORIGIN}/dashboard` }]);
     await w.click(`/requisitions/${REQ}`);
     expect(w.remembered()).toMatchObject({ url: `/requisitions/${REQ}` });
-    expect(w.calls).toEqual([`remember ${PENDING_LINK_CACHE}`, `navigate /requisitions/${REQ}`]);
+    expect(w.calls).toEqual([`remember ${PENDING_LINK_CACHE}`, `navigate /requisitions/${REQ}`, `remember ${PENDING_LINK_CACHE}`]);
   });
 
   it("purchasing notification (PO issued → its requisition) and receipts both keep their exact path", async () => {
@@ -65,7 +65,7 @@ describe("notification tap: remembered destination", () => {
       const w = loadWorker([]);
       await w.click(target);
       expect(w.remembered()?.url).toBe(target);
-      expect(w.calls.at(-1)).toBe(`openWindow ${target}`);
+      expect(w.calls.at(-2)).toBe(`openWindow ${target}`);
     }
   });
 
@@ -75,14 +75,14 @@ describe("notification tap: remembered destination", () => {
       const w = loadWorker([]);
       await w.click(bad);
       expect(w.remembered()?.url).toBe("/notifications");
-      expect(w.calls.at(-1)).toBe("openWindow /notifications");
+      expect(w.calls.at(-2)).toBe("openWindow /notifications");
     },
   );
 
   it("still messages the page when navigate() is refused (iOS), after remembering", async () => {
     const w = loadWorker([{ url: `${ORIGIN}/dashboard`, navigate: "rejects" }]);
     await w.click(`/requisitions/${REQ}`);
-    expect(w.calls).toEqual([`remember ${PENDING_LINK_CACHE}`, `navigate /requisitions/${REQ}`, `postMessage /requisitions/${REQ}`]);
+    expect(w.calls).toEqual([`remember ${PENDING_LINK_CACHE}`, `navigate /requisitions/${REQ}`, `postMessage /requisitions/${REQ}`, `openWindow /requisitions/${REQ}`, `remember ${PENDING_LINK_CACHE}`]);
   });
 
   it("the remembered destination survives a worker update (activate keeps it; old static caches go)", async () => {
@@ -100,6 +100,23 @@ describe("notification tap: remembered destination", () => {
   it("a new worker activates immediately (skipWaiting) and takes over open pages (clients.claim)", () => {
     expect(SOURCE).toMatch(/self\.skipWaiting\(\)/);
     expect(SOURCE).toMatch(/self\.clients\.claim\(\)/);
+  });
+});
+
+describe("training diagnostics recorded by the worker", () => {
+  const raw = (w: ReturnType<typeof loadWorker>, key: string) => w.store.get(PENDING_LINK_CACHE)?.get(key);
+  it("records the last tap: time, page type and steps — never the id or link", async () => {
+    const w = loadWorker([{ url: `${ORIGIN}/dashboard`, navigate: "rejects" }]);
+    await w.click(`/requisitions/${REQ}`);
+    const tap = JSON.parse(raw(w, "/__tkt/diag-last-tap")!);
+    expect(tap).toMatchObject({ page: "requisition detail", hadData: true, windows: 1, exact: false, navigate: "rejected", messaged: true, opened: true });
+    expect(typeof tap.at).toBe("number");
+    expect(raw(w, "/__tkt/diag-last-tap")).not.toContain(REQ);
+  });
+  it("records which worker build activated", async () => {
+    const w = loadWorker([]);
+    await w.activate();
+    expect(JSON.parse(raw(w, "/__tkt/diag-worker")!)).toMatchObject({ build: expect.stringMatching(/^\d{4}-\d{2}-\d{2}\.\d+$/) });
   });
 });
 

@@ -9,6 +9,8 @@
  * still goes through normal sign-in and permission checks.
  */
 const VERSION = "tkt-v1";
+// Identifies this worker build in the training diagnostics panel (no user data).
+const SW_BUILD = "2026-10-08.3";
 const STATIC_CACHE = `${VERSION}-static`;
 const OFFLINE_URL = "/offline";
 
@@ -27,6 +29,7 @@ self.addEventListener("activate", (event) => {
     caches.keys().then((keys) => Promise.all(keys.filter((k) => !k.startsWith(VERSION) && k !== PENDING_LINK_CACHE).map((k) => caches.delete(k)))),
   );
   self.clients.claim();
+  event.waitUntil(recordDiagnostic(WORKER_KEY, { build: SW_BUILD, activatedAt: Date.now() }));
 });
 
 function isStaticAsset(url) {
@@ -130,6 +133,7 @@ async function focusClient(client) {
 //    worker), told to route itself there;
 //  - with no open window, a new one is opened at that path.
 async function openFromNotification(path) {
+  const trace = { windows: 0, exact: false, navigate: "none", messaged: false, opened: false };
   const target = new URL(path, self.location.origin).href;
   const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
   const ours = windows.filter((client) => {
@@ -139,10 +143,12 @@ async function openFromNotification(path) {
       return false;
     }
   });
+  trace.windows = ours.length;
   const exact = ours.find((client) => client.url.split("#")[0] === target);
   if (exact) {
+    trace.exact = true;
     await focusClient(exact);
-    return;
+    return trace;
   }
   const client = ours.find((c) => c.focused) || ours.find((c) => c.visibilityState === "visible") || ours[0];
   if (client) {
@@ -150,23 +156,42 @@ async function openFromNotification(path) {
     if (typeof client.navigate === "function") {
       try {
         navigated = await client.navigate(target);
+        trace.navigate = navigated ? "ok" : "null";
       } catch {
         navigated = null;
+        trace.navigate = "rejected";
       }
+    } else {
+      trace.navigate = "missing";
     }
     if (navigated) {
       await focusClient(navigated);
-      return;
+      return trace;
     }
     try {
       client.postMessage({ type: NAVIGATE_MESSAGE, url: path });
+      trace.messaged = true;
     } catch {
       // Nothing else to try for this window.
     }
+    // iOS installed apps: when the open window cannot be moved, openWindow() is
+    // what reliably brings the app to the requested in-app path.
+    if (self.clients.openWindow) {
+      try {
+        await self.clients.openWindow(target);
+        trace.opened = true;
+      } catch {
+        // The message and the remembered destination remain.
+      }
+    }
     await focusClient(client);
-    return;
+    return trace;
   }
-  if (self.clients.openWindow) await self.clients.openWindow(target);
+  if (self.clients.openWindow) {
+    await self.clients.openWindow(target);
+    trace.opened = true;
+  }
+  return trace;
 }
 
 // iOS installed apps do not reliably follow the tap: WindowClient.navigate() may
@@ -178,6 +203,22 @@ async function openFromNotification(path) {
 // versioned and "activate" keeps it, so it survives a worker update.
 const PENDING_LINK_CACHE = "tkt-deeplink";
 const PENDING_LINK_KEY = "/__tkt/pending-notification-link";
+// Training diagnostics (what happened on the last tap; times, page type and steps only).
+const WORKER_KEY = "/__tkt/diag-worker";
+const LAST_TAP_KEY = "/__tkt/diag-last-tap";
+
+function pageKind(path) {
+  return path.startsWith("/requisitions/") ? "requisition detail" : path;
+}
+
+async function recordDiagnostic(key, value) {
+  try {
+    const cache = await caches.open(PENDING_LINK_CACHE);
+    await cache.put(key, new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } }));
+  } catch {
+    // Diagnostics are best effort.
+  }
+}
 
 async function rememberDestination(path) {
   try {
@@ -191,5 +232,12 @@ async function rememberDestination(path) {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const path = safePath(event.notification.data && event.notification.data.url);
-  event.waitUntil(rememberDestination(path).then(() => openFromNotification(path)));
+  const tappedAt = Date.now();
+  const hadData = Boolean(event.notification.data && event.notification.data.url);
+  event.waitUntil(
+    rememberDestination(path)
+      .then(() => openFromNotification(path))
+      .catch(() => ({ error: true }))
+      .then((trace) => recordDiagnostic(LAST_TAP_KEY, { build: SW_BUILD, at: tappedAt, page: pageKind(path), hadData, ...trace })),
+  );
 });
