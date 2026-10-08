@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { StatusBadge } from "@/components/ui/badge";
 import { PriorityIndicator } from "@/components/ui/priority-badge";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatTimestampDate } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import type { Priority } from "@/lib/priority";
 import type { RequisitionStatus } from "@/lib/workflow/status";
@@ -60,7 +60,8 @@ export function RequisitionCards({ rows, currency }: { rows: RequisitionListRow[
  * absolutely-positioned screen-reader text inside it is clipped instead of
  * widening the page.
  */
-export function RequisitionTable({ rows, currency, reviewerName }: { rows: RequisitionListRow[]; currency: string; reviewerName: (id: string | null) => string }) {
+/** `timezone` is the church timezone: the Submitted date matches the detail page and "today". */
+export function RequisitionTable({ rows, currency, timezone, reviewerName }: { rows: RequisitionListRow[]; currency: string; timezone: string; reviewerName: (id: string | null) => string }) {
   return (
     <div className="hidden overflow-hidden rounded-[var(--radius-card)] bg-white ring-1 ring-navy/10 xl:block">
       <div className="relative overflow-x-auto" data-testid="requisition-table-scroll">
@@ -82,7 +83,7 @@ export function RequisitionTable({ rows, currency, reviewerName }: { rows: Requi
                 <td className="whitespace-nowrap px-3 py-3">
                   <Link href={`/requisitions/${r.id}`} className="tabular font-bold underline-offset-4 hover:underline">{r.requisition_number}</Link>
                   {r.is_demo ? <span className="ml-1.5 text-[11px] font-medium text-navy/45">DEMO</span> : null}
-                  <span className="tabular block text-[13px] text-navy/60">Submitted {formatDate(r.submitted_at.slice(0, 10), "short")}</span>
+                  <span className="tabular block text-[13px] text-navy/60">Submitted {formatTimestampDate(r.submitted_at, timezone, "short")}</span>
                 </td>
                 <td className="min-w-[9rem] px-3 py-3">
                   {r.requester_name}
