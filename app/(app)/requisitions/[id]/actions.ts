@@ -200,6 +200,12 @@ async function storePdf(purchaseOrderId: string, version = 1) {
   return pdf;
 }
 
+/** Success wording for a new PO: issuing and emailing are reported separately. */
+function purchaseOrderIssuedMessage(poNumber: string, emailed: boolean, warning?: string): string {
+  const email = emailed ? "It was emailed to the requester." : "It was not emailed to the requester — download the PDF and share it with them.";
+  return warning ? `Purchase order ${poNumber} created. ${warning} ${email}` : `Purchase order ${poNumber} created successfully. ${email}`;
+}
+
 export async function issuePurchaseOrder(requisitionId: string, input: z.input<typeof poSchema>) {
   return guarded(async () => {
     await assertPermission("purchase_orders.issue");
@@ -221,9 +227,11 @@ export async function issuePurchaseOrder(requisitionId: string, input: z.input<t
     const supabase = await createSupabaseServerClient();
     const { data: po } = await supabase.from("purchase_orders").select("reply_token, purchase_order_items(description, quantity, line_total, line_number)").eq("id", r.id).single();
     const items = ((po?.purchase_order_items ?? []) as { description: string; quantity: string; line_total: string; line_number: number }[]).sort((a, b) => a.line_number - b.line_number);
-    after(() => notifyPurchaseOrderIssued(requisitionId, { id: r.id, po_number: r.po_number, total: r.total, reply_token: po?.reply_token as string, items }, pdf));
+    // Awaited (once) so the message only says "emailed" when the provider accepted the
+    // email; a skipped or failed email never undoes the issued Purchase Order.
+    const emailed = (await notifyPurchaseOrderIssued(requisitionId, { id: r.id, po_number: r.po_number, total: r.total, reply_token: po?.reply_token as string, items }, pdf)) === "sent";
     refresh(requisitionId);
-    return { ok: true, data: { poNumber: r.po_number }, message: warning ? `Purchase order ${r.po_number} created. ${warning}` : `Purchase order ${r.po_number} created successfully and emailed to the requester.` };
+    return { ok: true, data: { poNumber: r.po_number, emailed }, message: purchaseOrderIssuedMessage(r.po_number, emailed, warning) };
   });
 }
 

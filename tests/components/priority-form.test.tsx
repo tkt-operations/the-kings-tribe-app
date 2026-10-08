@@ -166,4 +166,25 @@ describe("requisition form priority", () => {
     expect(await screen.findByText("Monday, October 5, 2026")).toBeTruthy();
     expect(screen.queryByText("Tuesday, October 6, 2026")).toBeNull();
   });
+
+  it.each([
+    [true, /A confirmation has been emailed to you/],
+    [false, /Your request has been sent to the Finance team for review/],
+  ])("confirmation wording follows the real email result (emailed: %s)", async (emailed, wording) => {
+    submitExternalRequisition.mockResolvedValue({
+      ok: true,
+      data: {
+        requisition_number: "TKT-REQ-2026-0003", submitted_at: "2026-10-05T15:00:00Z", needed_by: "2026-10-12",
+        department_name: "Production Team", subcategory_name: "Audio Production", request_type_name: "Order", estimated_total: "160.00", status: "submitted",
+        items: [{ line_number: 1, description: "XLR cables", quantity: "4.00", estimated_total: "160.00", priority: "medium", essential_justification: null }],
+        confirmation_emailed: emailed,
+      },
+    });
+    window.scrollTo = vi.fn();
+    renderForm();
+    fillValid();
+    fireEvent.click(screen.getByRole("button", { name: "Submit requisition" }));
+    expect(await screen.findByText(wording)).toBeTruthy();
+    if (!emailed) expect(screen.queryByText(/emailed to you|confirmation email/)).toBeNull();
+  });
 });

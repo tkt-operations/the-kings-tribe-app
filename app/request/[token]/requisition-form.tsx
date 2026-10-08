@@ -524,7 +524,11 @@ function Confirmation({ summary, currency, timezone, onAnother }: { summary: Sub
         <CheckCircle2 className="mx-auto size-12 text-kingdom-green" aria-hidden />
         <p className="mt-4 text-sm font-bold uppercase tracking-[0.14em] text-navy/55">Request submitted</p>
         <h2 className="tabular mt-2 font-serif text-4xl">{summary.requisition_number}</h2>
-        <p className="mx-auto mt-3 max-w-md text-navy/70">A confirmation has been emailed to you. Keep this number for reference — you can reply to the confirmation email with questions.</p>
+        <p className="mx-auto mt-3 max-w-md text-navy/70">
+          {summary.confirmation_emailed
+            ? "A confirmation has been emailed to you. Keep this number for reference — you can reply to the confirmation email with questions."
+            : "Your request has been sent to the Finance team for review. Keep this number for reference — include it if you contact the Finance team about this request."}
+        </p>
         <dl className="mx-auto mt-8 max-w-md divide-y divide-navy/10 text-left text-[15px]">
           {[
             ["Department", `${summary.department_name} · ${summary.subcategory_name}`],

@@ -15,7 +15,7 @@ const rpc = vi.fn();
 vi.mock("@/lib/supabase/admin", () => ({ createSupabaseAdminClient: () => ({ rpc }) }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ "x-forwarded-for": "203.0.113.7", "user-agent": "Vitest" }) }));
 vi.mock("next/server", () => ({ after: vi.fn() }));
-vi.mock("@/lib/notify", () => ({ notifyRequisitionSubmitted: vi.fn() }));
+vi.mock("@/lib/notify", () => ({ notifyRequesterOfSubmission: vi.fn(async () => "not_sent"), notifyFinanceOfSubmission: vi.fn() }));
 const lookupProduct = vi.fn();
 vi.mock("@/lib/product/lookup", () => ({ lookupProduct: (...args: unknown[]) => lookupProduct(...args) }));
 const { previewFormContext } = await import("@/app/dev-preview/fixtures");
