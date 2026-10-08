@@ -129,7 +129,7 @@ declare
   v_scenarios text[] := array[
     'priority_mix', 'review_take_1', 'review_take_2', 'review_take_3', 'ready_for_po', 'ready_for_po_direct',
     'ready_to_order', 'receipt_pending', 'partial_purchase', 'advance_due', 'ready_to_close',
-    'on_hold_example', 'rejected_example', 'history', 'sundays'];
+    'on_hold_example', 'rejected_example', 'partially_approved', 'history', 'sundays'];
   v_name text;
   v_morgan uuid;
   v_taylor uuid;
@@ -319,6 +319,24 @@ begin
           'Catering for the quarterly fellowship lunch.', 9);
         perform pg_temp.tkt_as(v_taylor);
         perform public.review_requisition(v_req, 'reject', '[]'::jsonb, 'The fellowship lunch is already covered by the events budget.');
+
+      -- Partially Approved: one line in full, one at a reduced quantity, one rejected.
+      when 'partially_approved' then
+        v_req := pg_temp.tkt_submit(v_token, 'training:partially_approved', 'order', 'Children''s Ministry Team', 'Classroom Supplies',
+          jsonb_build_array(
+            pg_temp.tkt_item('Classroom storage bins', '6', '12.99', 'high'),
+            pg_temp.tkt_item('Dry-erase markers (12 pack)', '10', '9.49', 'medium'),
+            pg_temp.tkt_item('Wall-mounted TV for the kids room', '1', '499.00', 'low')),
+          'Supplies to organise the children''s classrooms for the new term.', 5);
+        v_items := pg_temp.tkt_items(v_req);
+        perform pg_temp.tkt_as(v_taylor);
+        perform public.review_requisition(v_req, 'partial', jsonb_build_array(
+          jsonb_build_object('item_id', v_items[1], 'decision', 'approved'),
+          jsonb_build_object('item_id', v_items[2], 'decision', 'approved', 'approved_quantity', '4',
+            'comment', 'Four packs cover this term; we have spares in the supply closet.'),
+          jsonb_build_object('item_id', v_items[3], 'decision', 'rejected',
+            'comment', 'A TV is outside this term''s classroom budget. Please resubmit next quarter.')),
+          'Approved the bins and some markers; the TV is not in this term''s budget.');
 
       -- Older completed requests so Reports and charts have history (S36, M9).
       when 'history' then

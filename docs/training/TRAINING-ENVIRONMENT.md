@@ -66,6 +66,9 @@ Template: `.env.training.example`. Local values go in `.env.training.local` (git
 
 Passwords are kept in a password manager, never in the repo.
 
+## Dates in the seeded history
+The older requisitions (`history` scenario) have backdated submission dates, but their review and close timestamps are current (the time the seed ran). Screenshots and video should avoid implying those review or close timestamps are historical. Historical lifecycle dates can be improved separately if Reports need them.
+
 ## Reset strategy
 - **Before each take:** `reset <scenario>`.
 - **Before a recording day:** `reset all` (keeps users, settings and the audit log).

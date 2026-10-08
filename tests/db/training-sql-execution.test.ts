@@ -124,7 +124,7 @@ describe("training-db.sh seed and reset", () => {
 
     const db = await trainingDatabase();
     for (const c of calls) await db.query(c.sql);
-    expect(await count(db, "select 1 from public.requisitions")).toBe(19);
+    expect(await count(db, "select 1 from public.requisitions")).toBe(20);
     expect(await count(db, "select 1 from public.service_dates")).toBe(27);
 
     expect(r.out).not.toContain(PASSWORD);

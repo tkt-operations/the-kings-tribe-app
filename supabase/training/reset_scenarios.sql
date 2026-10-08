@@ -27,7 +27,7 @@ declare
   v_scenarios text[] := array[
     'priority_mix', 'review_take_1', 'review_take_2', 'review_take_3', 'ready_for_po', 'ready_for_po_direct',
     'ready_to_order', 'receipt_pending', 'partial_purchase', 'advance_due', 'ready_to_close',
-    'on_hold_example', 'rejected_example', 'history', 'sundays'];
+    'on_hold_example', 'rejected_example', 'partially_approved', 'history', 'sundays'];
   v_name text;
   v_reqs uuid[];
   v_services uuid[];

@@ -81,7 +81,7 @@ describe("training seed and reset", () => {
       priority_mix: "submitted", review_take_1: "under_review", review_take_2: "submitted", review_take_3: "submitted",
       ready_for_po: "approved", ready_for_po_direct: "approved", ready_to_order: "po_issued", receipt_pending: "ordered",
       partial_purchase: "partially_purchased", advance_due: "approved", ready_to_close: "purchased",
-      on_hold_example: "on_hold", rejected_example: "rejected",
+      on_hold_example: "on_hold", rejected_example: "rejected", partially_approved: "partially_approved",
     };
     for (const [key, status] of Object.entries(expected)) expect([key, await statusOf(db, key)]).toEqual([key, status]);
     expect(await count(db, "select 1 from public.requisitions where submission_fingerprint like 'training:history:%'")).toBe(6);
@@ -95,6 +95,19 @@ describe("training seed and reset", () => {
       "select i.priority::text, i.essential_justification as reason from public.requisition_items i join public.requisitions r on r.id = i.requisition_id where r.submission_fingerprint = 'training:priority_mix' order by i.line_number");
     expect(rows.rows.map((r) => r.priority)).toEqual(["essential", "high", "medium", "low"]);
     expect(rows.rows[0].reason).toMatch(/sanctuary receiver failed/);
+  });
+
+  it("partially approves through the real review: one line in full, one reduced, one rejected", async () => {
+    const r = await one<{ status: string; outcome: string; reviewer: string; type: string }>(db,
+      "select r.status::text, r.review_outcome::text as outcome, r.reviewed_by::text as reviewer, t.key as type from public.requisitions r join public.request_types t on t.id = r.request_type_id where submission_fingerprint = 'training:partially_approved'");
+    expect(r).toEqual({ status: "partially_approved", outcome: "partially_approved", reviewer: staff.taylor, type: "order" });
+    const lines = await db.query<{ review_status: string; quantity: string; approved_quantity: string | null; priority: string; has_comment: boolean }>(
+      "select i.review_status::text, i.quantity::text, i.approved_quantity::text, i.priority::text, i.review_comment is not null as has_comment from public.requisition_items i join public.requisitions r on r.id = i.requisition_id where r.submission_fingerprint = 'training:partially_approved' order by i.line_number");
+    expect(lines.rows.map((l) => [l.review_status, Number(l.quantity), l.approved_quantity === null ? null : Number(l.approved_quantity), l.priority, l.has_comment])).toEqual([
+      ["approved", 6, 6, "high", false],
+      ["approved", 10, 4, "medium", true],
+      ["rejected", 1, null, "low", true],
+    ]);
   });
 
   it("produces the purchasing states the screenshots need", async () => {
@@ -160,6 +173,22 @@ describe("training seed and reset", () => {
     expect(await count(db, "select 1 from public.profiles where is_active")).toBe(5);
     expect(await count(db, "select 1 from public.audit_logs")).toBeGreaterThanOrEqual(audit);
     await db.exec(sql("seed_training.sql"));
-    expect(await count(db, "select 1 from public.requisitions")).toBe(19);
+    expect(await count(db, "select 1 from public.requisitions")).toBe(20);
+    expect(await statusOf(db, "partially_approved")).toBe("partially_approved");
+  });
+
+  it("reset partially_approved restores it without touching other scenarios, and re-seeding creates no duplicate", async () => {
+    const before = await one<{ id: string }>(db, "select id from public.requisitions where submission_fingerprint = 'training:partially_approved'");
+    const total = await count(db, "select 1 from public.requisitions");
+    await db.exec(sql("seed_training.sql", "partially_approved"));
+    expect(await count(db, "select 1 from public.requisitions where submission_fingerprint = 'training:partially_approved'")).toBe(1);
+    await db.exec(sql("reset_scenarios.sql", "partially_approved"));
+    expect(await count(db, "select 1 from public.requisitions")).toBe(total - 1);
+    await db.exec(sql("seed_training.sql", "partially_approved"));
+    const after = await one<{ id: string }>(db, "select id from public.requisitions where submission_fingerprint = 'training:partially_approved'");
+    expect(after.id).not.toBe(before.id);
+    expect(await statusOf(db, "partially_approved")).toBe("partially_approved");
+    expect(await count(db, "select 1 from public.requisitions")).toBe(total);
+    expect(await count(db, "select 1 from public.requisitions where is_demo")).toBe(0);
   });
 });
