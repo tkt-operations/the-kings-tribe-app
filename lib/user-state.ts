@@ -1,35 +1,37 @@
 /**
- * Account states on the Users page, derived from real fields only:
- *  - Supabase Auth: email_confirmed_at / last_sign_in_at (set once the person
- *    accepts their invitation and signs in)
- *  - public.profiles.is_active (app-level deactivation; not an auth ban)
+ * Account states on the Users page.
  *
- *   pending              invited, never activated, profile active
- *   active               activated, profile active
- *   deactivated          activated, profile deactivated
- *   pending_deactivated  never activated, profile deactivated
+ * Setup completion is the app's own record, profiles.account_setup_completed_at,
+ * set only after the person chose a password here or signed in with one.
+ * Supabase's email_confirmed_at / last_sign_in_at are NOT used for this: both
+ * are set the moment an invitation link is opened, before any password is
+ * chosen. Deactivation (profiles.is_active) is independent.
  *
- * Only `pending` may be sent a new invitation. Active users recover access with
- * a password reset; deactivated users (of either kind) must be reactivated
- * first, so a new invitation can never bypass a deactivation.
+ *   pending_setup        setup not completed, profile active
+ *   active               setup completed, profile active
+ *   deactivated_pending  setup not completed, profile deactivated
+ *   deactivated_active   setup completed, profile deactivated
+ *
+ * Only pending_setup users may be sent a new setup link. Which kind depends on
+ * Supabase: an invitation while their email is unconfirmed; once confirmed,
+ * Supabase refuses re-invitations, so a password recovery link instead.
+ * Active users use Forgot password; deactivated users must be reactivated first.
  */
-export type UserState = "pending" | "active" | "deactivated" | "pending_deactivated";
+export type UserState = "pending_setup" | "active" | "deactivated_pending" | "deactivated_active";
+export type SetupChannel = "invite" | "recovery";
 
-export interface AuthActivationFields {
-  email_confirmed_at?: string | null;
-  last_sign_in_at?: string | null;
+export function userState({ setupCompleted, isActive }: { setupCompleted: boolean; isActive: boolean }): UserState {
+  if (setupCompleted) return isActive ? "active" : "deactivated_active";
+  return isActive ? "pending_setup" : "deactivated_pending";
 }
 
-/** True once the person has accepted an invitation (or otherwise signed in). */
-export function hasActivatedAccount(user: AuthActivationFields): boolean {
-  return Boolean(user.email_confirmed_at || user.last_sign_in_at);
+/** Supabase's own notion of confirmed (it refuses re-invitations once this is set). */
+export function isEmailConfirmed(user: { email_confirmed_at?: string | null }): boolean {
+  return Boolean(user.email_confirmed_at);
 }
 
-export function userState({ activated, isActive }: { activated: boolean; isActive: boolean }): UserState {
-  if (activated) return isActive ? "active" : "deactivated";
-  return isActive ? "pending" : "pending_deactivated";
-}
-
-export function canReissueInvitation(state: UserState): boolean {
-  return state === "pending";
+/** How to send a new setup link, or null when none may be sent. */
+export function setupChannel(state: UserState, emailConfirmed: boolean): SetupChannel | null {
+  if (state !== "pending_setup") return null;
+  return emailConfirmed ? "recovery" : "invite";
 }

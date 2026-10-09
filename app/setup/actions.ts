@@ -75,7 +75,12 @@ export async function createFirstAdministrator(_prev: SetupState, formData: Form
   }
 
   const supabase = await createSupabaseServerClient();
-  await supabase.auth.signInWithPassword({ email: parsed.data.email, password: parsed.data.password });
+  const { error: signInError } = await supabase.auth.signInWithPassword({ email: parsed.data.email, password: parsed.data.password });
+  if (!signInError) {
+    // They chose this password themselves on this form.
+    const { error: setupError } = await supabase.rpc("mark_account_setup_complete", { p_method: "password_set" });
+    if (setupError) console.error("Setup: account setup marker failed", { code: setupError.code });
+  }
   await setFlash("admin-created");
   redirect("/admin/setup");
 }
