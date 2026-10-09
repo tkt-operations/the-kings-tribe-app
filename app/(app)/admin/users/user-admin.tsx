@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Copy, UserPlus } from "lucide-react";
+import { Copy, Link2, Mail, UserPlus } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,8 +11,9 @@ import { useFieldErrors } from "@/components/ui/form-feedback";
 import { LoadingButton } from "@/components/ui/submit-button";
 import { useToast } from "@/components/ui/toast";
 import { useAction } from "@/components/ui/use-action";
+import { canReissueInvitation, userState } from "@/lib/user-state";
 import { rules, validate } from "@/lib/validation/form";
-import { inviteUser, setUserActive, setUserRole } from "./actions";
+import { inviteUser, resendInvitation, setUserActive, setUserRole } from "./actions";
 
 interface Role { id: string; key: string; name: string; description: string | null }
 interface UserRow { id: string; email: string; full_name: string; is_active: boolean; roleIds: string[]; lastSignIn: string | null; confirmed: boolean }
@@ -24,7 +25,10 @@ export function UserAdmin({ users, roles, currentUserId }: { users: UserRow[]; r
       <div className="flex justify-end"><InviteDialog roles={roles} /></div>
       {error ? <Alert tone="error">{error}</Alert> : null}
       <ul className={`space-y-3 ${pending ? "opacity-70" : ""}`}>
-        {users.map((u) => (
+        {users.map((u) => {
+          const state = userState({ activated: u.confirmed, isActive: u.is_active });
+          const name = u.full_name || u.email;
+          return (
           <li key={u.id} className="rounded-[var(--radius-card)] bg-white p-4 ring-1 ring-navy/10 sm:p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
@@ -35,16 +39,26 @@ export function UserAdmin({ users, roles, currentUserId }: { users: UserRow[]; r
                   {!u.confirmed ? <Badge tone="attention">Invitation pending</Badge> : null}
                   {u.lastSignIn ? <span className="text-xs text-navy/50">Last sign-in {new Date(u.lastSignIn).toLocaleDateString()}</span> : null}
                 </div>
+                {state === "pending_deactivated" ? <p className="mt-1 text-xs text-navy/60">Reactivate this user before sending a new invitation.</p> : null}
+                {canReissueInvitation(state) && u.id !== currentUserId ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Button size="sm" variant="secondary" className="h-10" disabled={pending}
+                      onClick={() => run(() => resendInvitation(u.id, "email"), { successMessage: "Invitation sent.", errorMessage: "Unable to create a new invitation." })}>
+                      <Mail className="size-4" aria-hidden /> Resend invitation
+                    </Button>
+                    <ReplaceLinkDialog userId={u.id} name={name} disabled={pending} />
+                  </div>
+                ) : null}
               </div>
               {u.id !== currentUserId ? (
                 <Button size="sm" variant={u.is_active ? "danger" : "secondary"} className="h-10" disabled={pending}
-                  onClick={() => run(() => setUserActive(u.id, !u.is_active), { successMessage: u.is_active ? `${u.full_name || u.email} deactivated successfully.` : `${u.full_name || u.email} reactivated successfully.` })}>
+                  onClick={() => run(() => setUserActive(u.id, !u.is_active), { successMessage: u.is_active ? `${name} deactivated successfully.` : `${name} reactivated successfully.` })}>
                   {u.is_active ? "Deactivate" : "Reactivate"}
                 </Button>
               ) : null}
             </div>
             <fieldset className="mt-3">
-              <legend className="sr-only">Roles for {u.full_name || u.email}</legend>
+              <legend className="sr-only">Roles for {name}</legend>
               <div className="flex flex-wrap gap-2">
                 {roles.map((r) => {
                   const checked = u.roleIds.includes(r.id);
@@ -62,9 +76,69 @@ export function UserAdmin({ users, roles, currentUserId }: { users: UserRow[]; r
               </div>
             </fieldset>
           </li>
-        ))}
+          );
+        })}
       </ul>
     </div>
+  );
+}
+
+/** Copy-to-clipboard for a one-time invitation link, with a manual fallback. */
+function CopyLinkButton({ link }: { link: string }) {
+  const toast = useToast();
+  return (
+    <Button onClick={async () => {
+      try {
+        await navigator.clipboard.writeText(link);
+        toast.success("Invitation link copied to the clipboard.");
+      } catch {
+        toast.error("Unable to copy automatically. Select the link and copy it manually.");
+      }
+    }}><Copy className="size-4" aria-hidden /> Copy link</Button>
+  );
+}
+
+/**
+ * Replace a pending user's invitation link. The new link is shown once, kept
+ * only in this dialog's state, and forgotten when the dialog closes.
+ */
+function ReplaceLinkDialog({ userId, name, disabled }: { userId: string; name: string; disabled: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [link, setLink] = useState<string | null>(null);
+  const { pending, error, message, run } = useAction();
+  function close() { setOpen(false); setLink(null); }
+  return (
+    <>
+      <Button size="sm" variant="secondary" className="h-10" disabled={disabled} onClick={() => { setLink(null); setOpen(true); }}>
+        <Link2 className="size-4" aria-hidden /> Replace invitation link
+      </Button>
+      <Dialog open={open} onClose={close} title="Replace invitation link" description={`Create a new invitation link for ${name}. Any earlier invitation link or email will stop working.`}>
+        {link ? (
+          <div className="space-y-4">
+            <Alert tone="success" title="New invitation link created">{message} Send it to them privately — it can only be used once and will not be shown again.</Alert>
+            <Input readOnly value={link} onFocus={(e) => e.target.select()} aria-label="Invitation link" />
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={close}>Done</Button>
+              <CopyLinkButton link={link} />
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {error ? <Alert tone="error">{error}</Alert> : null}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={close}>Cancel</Button>
+              <LoadingButton pending={pending} pendingLabel="Creating…"
+                onClick={() => run(() => resendInvitation(userId, "link"), {
+                  successMessage: "New invitation link created.",
+                  errorMessage: "Unable to create a new invitation.",
+                  refresh: false,
+                  onSuccess: (data) => { if (data?.link) setLink(data.link); },
+                })}>Create new link</LoadingButton>
+            </div>
+          </div>
+        )}
+      </Dialog>
+    </>
   );
 }
 
@@ -74,7 +148,6 @@ function InviteDialog({ roles }: { roles: Role[] }) {
   const [link, setLink] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fields = useFieldErrors();
-  const toast = useToast();
   const { pending, error, message, run } = useAction();
 
   function submit(e: React.FormEvent) {
@@ -99,14 +172,7 @@ function InviteDialog({ roles }: { roles: Role[] }) {
           <div className="space-y-4">
             <Alert tone="success" title="Invitation link created">{message}</Alert>
             <Input readOnly value={link} onFocus={(e) => e.target.select()} aria-label="Invitation link" />
-            <Button onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(link);
-                toast.success("Invitation link copied to the clipboard.");
-              } catch {
-                toast.error("Unable to copy automatically. Select the link and copy it manually.");
-              }
-            }}><Copy className="size-4" aria-hidden /> Copy link</Button>
+            <CopyLinkButton link={link} />
           </div>
         ) : (
           <form ref={formRef} className="space-y-4" onSubmit={submit} noValidate>

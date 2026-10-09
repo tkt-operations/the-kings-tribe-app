@@ -3,6 +3,7 @@ import { Alert } from "@/components/ui/alert";
 import { requirePagePermission } from "@/lib/auth";
 import { createSupabaseAdminClient, isAdminClientConfigured } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { hasActivatedAccount } from "@/lib/user-state";
 import { UserAdmin } from "./user-admin";
 
 export const metadata = { title: "Users" };
@@ -19,7 +20,7 @@ export default async function UsersPage() {
   const authInfo = new Map<string, { confirmed: boolean; lastSignIn: string | null }>();
   if (isAdminClientConfigured()) {
     const { data } = await createSupabaseAdminClient().auth.admin.listUsers({ perPage: 200 });
-    for (const u of data?.users ?? []) authInfo.set(u.id, { confirmed: Boolean(u.email_confirmed_at || u.last_sign_in_at), lastSignIn: u.last_sign_in_at ?? null });
+    for (const u of data?.users ?? []) authInfo.set(u.id, { confirmed: hasActivatedAccount(u), lastSignIn: u.last_sign_in_at ?? null });
   }
   const users = ((profiles ?? []) as { id: string; email: string; full_name: string; is_active: boolean }[]).map((p) => ({
     ...p,
