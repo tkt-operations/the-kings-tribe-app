@@ -10,39 +10,55 @@ const MIGRATION = "20261012000100_account_setup_state.sql";
 const setupAt = async (db: Db, id: string) =>
   (await one<{ at: string | null }>(db, "select account_setup_completed_at as at from public.profiles where id = $1", [id])).at;
 
-describe("backfill marks only provable completions", () => {
+describe("backfill marks only users proven by a password sign-in", () => {
   let db: Db;
   const ids: Record<string, string> = {};
 
   beforeAll(async () => {
     db = await createTestDatabase({ before: MIGRATION });
-    const user = async (key: string, sql: string) => {
+    const user = async (key: string, sql: string, sessions: string[] = []) => {
       ids[key] = await createUser(db, `${key}@example.org`, ["viewer"]);
       await db.query(sql, [ids[key]]);
+      for (const method of sessions) {
+        await db.query("with s as (insert into auth.sessions (user_id) values ($1) returning id) insert into auth.mfa_amr_claims (session_id, authentication_method) select id, $2 from s", [ids[key], method]);
+      }
     };
-    // First administrator from /setup: created with a password, never invited.
+    // First administrator from /setup: never invited, has a password, confirmed, has signed in — but no live password session.
     await user("founder", "update auth.users set encrypted_password = 'hash', email_confirmed_at = now(), last_sign_in_at = now() where id = $1");
+    // Created by an administrator with an admin-typed password (dashboard/API): never invited, has a password.
+    await user("adminCreated", "update auth.users set encrypted_password = 'admin-typed', email_confirmed_at = now() where id = $1");
     // Invited, never opened.
     await user("unopened", "update auth.users set invited_at = now() where id = $1");
-    // Invited, opened the link: Supabase confirmed them, set a random password and signed them in (otp session).
-    await user("opened", "update auth.users set invited_at = now(), encrypted_password = 'random', email_confirmed_at = now(), last_sign_in_at = now() where id = $1");
-    await db.query("with s as (insert into auth.sessions (user_id) values ($1) returning id) insert into auth.mfa_amr_claims (session_id, authentication_method) select id, 'otp' from s", [ids.opened]);
-    // Same as "opened", plus a recovery session (the affected production case).
-    await user("recovered", "update auth.users set invited_at = now(), encrypted_password = 'random', email_confirmed_at = now(), last_sign_in_at = now() where id = $1");
-    await db.query("with s as (insert into auth.sessions (user_id) values ($1) returning id) insert into auth.mfa_amr_claims (session_id, authentication_method) select id, 'recovery' from s", [ids.recovered]);
-    // Invited, and has since signed in with a password: provable.
-    await user("signedIn", "update auth.users set invited_at = now(), encrypted_password = 'chosen', email_confirmed_at = now(), last_sign_in_at = now() where id = $1");
-    await db.query("with s as (insert into auth.sessions (user_id) values ($1) returning id) insert into auth.mfa_amr_claims (session_id, authentication_method) select id, 'password' from s", [ids.signedIn]);
+    // Invited, opened the link: Supabase confirmed them, set a random temporary password and started an otp session.
+    await user("opened", "update auth.users set invited_at = now(), encrypted_password = 'supabase-temporary', email_confirmed_at = now(), last_sign_in_at = now() where id = $1", ["otp"]);
+    // Same, PKCE invite link.
+    await user("openedPkce", "update auth.users set invited_at = now(), encrypted_password = 'supabase-temporary', email_confirmed_at = now(), last_sign_in_at = now() where id = $1", ["invite"]);
+    // Opened the invite, then a recovery link (the affected production finance case).
+    await user("recovered", "update auth.users set invited_at = now(), encrypted_password = 'supabase-temporary', email_confirmed_at = now(), last_sign_in_at = now() where id = $1", ["otp", "recovery"]);
+    // Other non-password sign-ins.
+    await user("magicLink", "update auth.users set email_confirmed_at = now(), last_sign_in_at = now() where id = $1", ["magiclink", "token_refresh"]);
+    // email_confirmed_at alone; last_sign_in_at alone.
+    await user("confirmedOnly", "update auth.users set email_confirmed_at = now() where id = $1");
+    await user("signInAtOnly", "update auth.users set last_sign_in_at = now() where id = $1");
+    // Proven: a live session started by a password sign-in (invited or not).
+    await user("invitedThenPassword", "update auth.users set invited_at = now(), encrypted_password = 'chosen', email_confirmed_at = now(), last_sign_in_at = now() where id = $1", ["otp", "password"]);
+    await user("founderSignedIn", "update auth.users set encrypted_password = 'hash', email_confirmed_at = now(), last_sign_in_at = now() where id = $1", ["password"]);
     await applyMigrationsFrom(db, MIGRATION);
   });
 
   it.each([
-    ["founder", true],
-    ["unopened", false],
-    ["opened", false],
-    ["recovered", false],
-    ["signedIn", true],
-  ])("%s → complete: %s", async (key, complete) => {
+    ["founder", false, "password present but no password session — waits for next password sign-in"],
+    ["adminCreated", false, "an administrator-set password is not proof"],
+    ["unopened", false, "invited, never opened"],
+    ["opened", false, "Supabase temporary password + otp session"],
+    ["openedPkce", false, "Supabase temporary password + invite session"],
+    ["recovered", false, "invite + recovery sessions (affected finance user)"],
+    ["magicLink", false, "magic link / token refresh sessions"],
+    ["confirmedOnly", false, "email_confirmed_at alone"],
+    ["signInAtOnly", false, "last_sign_in_at alone"],
+    ["invitedThenPassword", true, "a live password session"],
+    ["founderSignedIn", true, "a live password session"],
+  ])("%s → complete: %s (%s)", async (key, complete) => {
     expect((await setupAt(db, ids[key])) !== null).toBe(complete);
   });
 
@@ -51,7 +67,7 @@ describe("backfill marks only provable completions", () => {
       select (select count(*)::int from public.profiles where not is_active) as inactive,
              (select count(*)::int from public.user_roles) as roles,
              (select count(*)::int from public.audit_logs where action = 'user.account_setup_completed') as audits`);
-    expect(r).toEqual({ inactive: 0, roles: 5, audits: 0 });
+    expect(r).toEqual({ inactive: 0, roles: 11, audits: 0 });
   });
 });
 

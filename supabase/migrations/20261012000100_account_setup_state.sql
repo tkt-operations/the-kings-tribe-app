@@ -85,25 +85,20 @@ revoke all on function public.log_account_recovery_issued(uuid, text) from publi
 grant execute on function public.mark_account_setup_complete(text) to authenticated;
 grant execute on function public.log_account_recovery_issued(uuid, text) to authenticated;
 
--- Backfill: only where completion is provable. Everyone else stays null and is
--- marked automatically when they next set a password or sign in with one.
---  1. Accounts created with a password rather than invited (e.g. the first
---     administrator from /setup): invited_at is null and a password exists.
---  2. Accounts with a live session that was started by a password sign-in.
--- Invited users who merely opened their link (temporary random password,
--- otp/recovery sessions only) are deliberately NOT marked.
+-- Backfill: only where completion is proven by an actual password sign-in.
+-- False negatives are acceptable (anyone missed is marked automatically at
+-- their next password sign-in); false positives are not. So the mere presence
+-- of a password is NOT used: Supabase sets a random temporary password when an
+-- invitation link is opened, and an administrator can set one for someone who
+-- never chose it. email_confirmed_at and last_sign_in_at are not used either.
+-- Supabase records how each session was started (auth.mfa_amr_claims);
+-- 'password' is written only for a password sign-in (or a password sign-up),
+-- never for invitation, recovery, magic-link or OTP links.
 update public.profiles p
    set account_setup_completed_at = now()
  where p.account_setup_completed_at is null
    and exists (
-     select 1 from auth.users u
-      where u.id = p.id
-        and (
-          (u.invited_at is null and coalesce(u.encrypted_password, '') <> '')
-          or exists (
-            select 1 from auth.sessions s
-              join auth.mfa_amr_claims c on c.session_id = s.id
-             where s.user_id = u.id and c.authentication_method = 'password'
-          )
-        )
+     select 1 from auth.sessions s
+       join auth.mfa_amr_claims c on c.session_id = s.id
+      where s.user_id = p.id and c.authentication_method = 'password'
    );
