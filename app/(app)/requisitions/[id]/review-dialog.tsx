@@ -114,7 +114,7 @@ export function ReviewDialog(props: {
       <Button variant="gold" onClick={() => setOpen(true)}>
         <ClipboardCheck className="size-4" aria-hidden /> Review
       </Button>
-      <Dialog open={open} onClose={() => setOpen(false)} title="Finance review" description="Decide on the request and each line. The requester is notified of the outcome." wide>
+      <Dialog open={open} onClose={() => setOpen(false)} title="Finance review" description="Decide on the request and each line. The decision is saved when you submit this review. If requester notifications are configured, the requester may receive an update." wide>
         <form ref={formRef} onSubmit={submit} className="space-y-5" noValidate>
           {error ? <Alert tone="error">{error}</Alert> : null}
           <RequiredNote />

@@ -149,7 +149,7 @@ export default async function RequisitionsPage({ searchParams }: PageProps<"/req
       ) : (
         <>
           <RequisitionCards rows={rows} currency={currency} />
-          <RequisitionTable rows={rows} currency={currency} reviewerName={(id) => (id ? names.get(id) ?? "—" : "—")} />
+          <RequisitionTable rows={rows} currency={currency} timezone={settings?.timezone ?? "UTC"} reviewerName={(id) => (id ? names.get(id) ?? "—" : "—")} />
 
           <nav className="mt-6 flex items-center justify-between text-sm" aria-label="Pagination">
             <span className="text-navy/60">{count} requisition{count === 1 ? "" : "s"}</span>

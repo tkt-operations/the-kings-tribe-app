@@ -19,6 +19,14 @@ import { STATUS_LABELS, type RequisitionStatus } from "@/lib/workflow/status";
  * action that triggered them.
  */
 
+/**
+ * What a requester-facing message may truthfully say about an email:
+ * "sent" only when the provider accepted it; anything else (not configured,
+ * opted out, failed, notification error) is "not_sent". Never carries
+ * provider details.
+ */
+export type EmailOutcome = "sent" | "not_sent";
+
 interface RequisitionNotice {
   id: string;
   requisition_number: string;
@@ -146,8 +154,9 @@ async function sendToRequester(
   subject: string,
   content: EmailContent,
   opts: { attachments?: { filename: string; content: Buffer }[]; replyTo?: string | null; idempotencyKey: string; sms?: string },
-) {
+): Promise<EmailOutcome> {
   const { admin, settings, churchLines, appUrl } = await context();
+  let outcome: EmailOutcome = "not_sent";
   const manage = r.prefs ? `${appUrl}/notifications/${r.prefs.manage_token}` : null;
   const rendered = renderEmail(
     { ...content, footerNote: content.footerNote ?? (manage ? `Manage email/SMS updates for this request: ${manage}` : undefined) },
@@ -166,6 +175,7 @@ async function sendToRequester(
       idempotencyKey: opts.idempotencyKey,
     });
     await log(admin, { requisition_id: r.id, channel: "email", template, recipient: r.requester_email, subject, result });
+    if (result.status === "sent") outcome = "sent";
   }
   if (opts.sms && r.prefs?.sms_opt_in) {
     const provider = getSmsProvider();
@@ -183,6 +193,7 @@ async function sendToRequester(
     }
     await log(admin, { requisition_id: r.id, channel: "sms", template, recipient: to ?? r.requester_phone, result });
   }
+  return outcome;
 }
 
 function defaultReplyTo(r: RequisitionNotice, settings: ChurchSettings): string | null {
@@ -190,33 +201,44 @@ function defaultReplyTo(r: RequisitionNotice, settings: ChurchSettings): string 
   return (base && buildReplyAddress(base, { kind: "req", token: r.reply_token })) || settings.email || null;
 }
 
-function guard(fn: () => Promise<void>): Promise<void> {
-  if (!isAdminClientConfigured()) return Promise.resolve();
-  return fn().catch((error) => console.error("[notify]", error));
+function guard(fn: () => Promise<void>): Promise<void>;
+function guard<T>(fn: () => Promise<T>, fallback: T): Promise<T>;
+function guard<T>(fn: () => Promise<T>, fallback?: T): Promise<T | undefined> {
+  if (!isAdminClientConfigured()) return Promise.resolve(fallback);
+  return fn().catch((error) => {
+    console.error("[notify]", error);
+    return fallback;
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Public notification functions
 // ---------------------------------------------------------------------------
 
-export function notifyRequisitionSubmitted(requisitionId: string): Promise<void> {
-  return guard(async () => {
-    const r = await loadRequisition(requisitionId);
-    if (!r) return;
-    const { admin, settings, churchLines, appUrl } = await context();
-    const currency = settings.currency_code;
-    const details: [string, string][] = [
-      ["Requisition #", r.requisition_number],
-      ["Department", `${r.department} · ${r.subcategory}`],
-      ["Request type", r.requestType],
-      ["Submitted", formatDateTime(r.submitted_at, settings.timezone)],
-      ["Date needed", formatDate(r.needed_by, "long")],
-      ["Current status", STATUS_LABELS[r.status]],
-    ];
-    const items = itemRows(r, currency, false, true);
-    const total = { label: "Estimated total", amount: formatMoney(r.estimated_total, currency) };
+function submissionDetails(r: RequisitionNotice, settings: ChurchSettings) {
+  const currency = settings.currency_code;
+  const details: [string, string][] = [
+    ["Requisition #", r.requisition_number],
+    ["Department", `${r.department} · ${r.subcategory}`],
+    ["Request type", r.requestType],
+    ["Submitted", formatDateTime(r.submitted_at, settings.timezone)],
+    ["Date needed", formatDate(r.needed_by, "long")],
+    ["Current status", STATUS_LABELS[r.status]],
+  ];
+  return { details, items: itemRows(r, currency, false, true), total: { label: "Estimated total", amount: formatMoney(r.estimated_total, currency) } };
+}
 
-    await sendToRequester(
+/**
+ * The requester's "We received your request" email. Resolves to whether the
+ * provider accepted it, so the confirmation screen only claims what happened.
+ */
+export function notifyRequesterOfSubmission(requisitionId: string): Promise<EmailOutcome> {
+  return guard(async (): Promise<EmailOutcome> => {
+    const r = await loadRequisition(requisitionId);
+    if (!r) return "not_sent";
+    const { settings } = await context();
+    const { details, items, total } = submissionDetails(r, settings);
+    return sendToRequester(
       r,
       "requisition_submitted",
       `Requisition ${r.requisition_number} received`,
@@ -231,7 +253,17 @@ export function notifyRequisitionSubmitted(requisitionId: string): Promise<void>
       },
       { idempotencyKey: `req-submitted-${r.id}`, sms: `We received requisition ${r.requisition_number}.` },
     );
+  }, "not_sent");
+}
 
+/** The Finance team's "New requisition to review" email. */
+export function notifyFinanceOfSubmission(requisitionId: string): Promise<void> {
+  return guard(async () => {
+    const r = await loadRequisition(requisitionId);
+    if (!r) return;
+    const { admin, settings, churchLines, appUrl } = await context();
+    const currency = settings.currency_code;
+    const { details, items, total } = submissionDetails(r, settings);
     const recipients = await financeRecipients(admin, settings);
     const subject = financeSubmissionSubject(`New requisition ${r.requisition_number} — ${r.department} (${formatMoney(r.estimated_total, currency)})`, r.items);
     const alert = priorityAlert(r.items);
@@ -255,6 +287,13 @@ export function notifyRequisitionSubmitted(requisitionId: string): Promise<void>
       await log(admin, { requisition_id: r.id, channel: "email", template: "finance_new_requisition", recipient: recipients.join(", "), subject, result });
     }
   });
+}
+
+/** Both submission emails (requester first). Resolves to the requester email's outcome. */
+export async function notifyRequisitionSubmitted(requisitionId: string): Promise<EmailOutcome> {
+  const outcome = await notifyRequesterOfSubmission(requisitionId);
+  await notifyFinanceOfSubmission(requisitionId);
+  return outcome;
 }
 
 const STATUS_MESSAGES: Partial<Record<RequisitionStatus, { heading: string; body: string }>> = {
@@ -307,15 +346,16 @@ export function notifyStatusChange(requisitionId: string, status: RequisitionSta
   });
 }
 
-export function notifyPurchaseOrderIssued(requisitionId: string, po: { id: string; po_number: string; total: string; reply_token: string; items: { description: string; quantity: string; line_total: string }[] }, pdf: Buffer | null): Promise<void> {
-  return guard(async () => {
+/** The requester's Purchase Order email. Resolves to whether the provider accepted it. */
+export function notifyPurchaseOrderIssued(requisitionId: string, po: { id: string; po_number: string; total: string; reply_token: string; items: { description: string; quantity: string; line_total: string }[] }, pdf: Buffer | null): Promise<EmailOutcome> {
+  return guard(async (): Promise<EmailOutcome> => {
     const r = await loadRequisition(requisitionId);
-    if (!r) return;
+    if (!r) return "not_sent";
     const { settings } = await context();
     const currency = settings.currency_code;
     const base = serverEnv().receiptsInboundAddress;
     const replyTo = base ? buildReplyAddress(base, { kind: "po", token: po.reply_token }) : null;
-    await sendToRequester(
+    return sendToRequester(
       r,
       "po_issued",
       `Purchase Order ${po.po_number} for ${r.requisition_number}`,
@@ -342,7 +382,7 @@ export function notifyPurchaseOrderIssued(requisitionId: string, po: { id: strin
         sms: `Purchase Order ${po.po_number} was issued for ${r.requisition_number}. Check your email.`,
       },
     );
-  });
+  }, "not_sent");
 }
 
 export function notifyReceiptReceived(requisitionId: string | null, info: { source: "email" | "upload"; from?: string; unmatched?: boolean }): Promise<void> {

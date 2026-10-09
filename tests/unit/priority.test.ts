@@ -150,7 +150,7 @@ describe("priority reporting", () => {
   });
 
   it("exports Line Item Priority and Essential Justification per line", () => {
-    const csv = requisitionItemsCsv(items);
+    const csv = requisitionItemsCsv(items, "UTC");
     const [header, first, , third] = csv.trim().split("\r\n");
     expect(header).toContain("Line Item Priority,Essential Justification");
     expect(first).toContain("Mic,Essential,Needed Sunday,1.00,1200.00,Approved");
@@ -159,7 +159,7 @@ describe("priority reporting", () => {
   });
 
   it("adds highest priority and Essential count to the requisitions CSV", () => {
-    const csv = requisitionsCsv([{ id: "r1", requisition_number: "TKT-REQ-2026-0001", submitted_at: "2026-10-05T12:00:00Z", status: "approved", estimated_total: "1360.00", approved_total: "1360.00", actual_total: "1150.00", department: "Production Team", subcategory: "Audio", request_type: "Order", expense_category: null, highest_item_priority: "essential", essential_item_count: 2 }]);
+    const csv = requisitionsCsv([{ id: "r1", requisition_number: "TKT-REQ-2026-0001", submitted_at: "2026-10-05T12:00:00Z", status: "approved", estimated_total: "1360.00", approved_total: "1360.00", actual_total: "1150.00", department: "Production Team", subcategory: "Audio", request_type: "Order", expense_category: null, highest_item_priority: "essential", essential_item_count: 2 }], "UTC");
     const [header, row] = csv.trim().split("\r\n");
     expect(header).toContain("Highest item priority,Essential items");
     expect(row).toContain("Approved,Essential,2,1360.00,1360.00,1150.00,-210.00");

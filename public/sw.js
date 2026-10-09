@@ -23,7 +23,8 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => !k.startsWith(VERSION)).map((k) => caches.delete(k)))),
+    // Old static caches go; the remembered notification destination (PENDING_LINK_CACHE) is kept across updates.
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => !k.startsWith(VERSION) && k !== PENDING_LINK_CACHE).map((k) => caches.delete(k)))),
   );
   self.clients.claim();
 });
@@ -162,13 +163,43 @@ async function openFromNotification(path) {
     } catch {
       // Nothing else to try for this window.
     }
+    // iOS installed apps: when the open window cannot be moved, openWindow() is
+    // what reliably brings the app to the requested in-app path (same origin,
+    // already allowlisted by safePath()).
+    if (self.clients.openWindow) {
+      try {
+        await self.clients.openWindow(target);
+      } catch {
+        // The message and the remembered destination remain.
+      }
+    }
     await focusClient(client);
     return;
   }
   if (self.clients.openWindow) await self.clients.openWindow(target);
 }
 
+// iOS installed apps do not reliably follow the tap: WindowClient.navigate() may
+// not move the window, a message to a suspended page can be lost, and a cold
+// launch can open at the start page instead of the requested path. So the tapped
+// destination is also remembered (path + time only, nothing sensitive) and the
+// app routes to it when it starts, resumes or changes page
+// (components/pwa/service-worker-registration.tsx). The cache name is not
+// versioned and "activate" keeps it, so it survives a worker update.
+const PENDING_LINK_CACHE = "tkt-deeplink";
+const PENDING_LINK_KEY = "/__tkt/pending-notification-link";
+
+async function rememberDestination(path) {
+  try {
+    const cache = await caches.open(PENDING_LINK_CACHE);
+    await cache.put(PENDING_LINK_KEY, new Response(JSON.stringify({ url: path, at: Date.now() }), { headers: { "Content-Type": "application/json" } }));
+  } catch {
+    // Best effort: the direct navigation below still runs.
+  }
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  event.waitUntil(openFromNotification(safePath(event.notification.data && event.notification.data.url)));
+  const path = safePath(event.notification.data && event.notification.data.url);
+  event.waitUntil(rememberDestination(path).then(() => openFromNotification(path)));
 });

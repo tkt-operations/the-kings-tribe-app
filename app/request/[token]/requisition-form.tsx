@@ -13,7 +13,7 @@ import { LoadingButton } from "@/components/ui/submit-button";
 import { useToast } from "@/components/ui/toast";
 import { isNavigationSignal } from "@/components/ui/use-action";
 import { cn } from "@/lib/cn";
-import { formatDate, formatDateTime } from "@/lib/dates";
+import { formatDate, formatDateTime, formatTimestampDate } from "@/lib/dates";
 import { formatCents, formatMoney, lineTotal, parseMoney, parseQuantity } from "@/lib/money";
 import { checkReceiptFile, RECEIPT_ACCEPT, RECEIPT_MAX_FILES } from "@/lib/receipt-files";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -29,7 +29,7 @@ export function RequisitionForm({ token, context, stamp }: { token: string; cont
   const [summary, setSummary] = useState<SubmissionSummary | null>(null);
   const [formKey, setFormKey] = useState(0);
   if (summary) {
-    return <Confirmation summary={summary} currency={context.currency} onAnother={() => { setSummary(null); setFormKey((k) => k + 1); }} />;
+    return <Confirmation summary={summary} currency={context.currency} timezone={context.timezone} onAnother={() => { setSummary(null); setFormKey((k) => k + 1); }} />;
   }
   return <FormBody key={formKey} token={token} context={context} stamp={stamp} onSubmitted={setSummary} />;
 }
@@ -517,19 +517,23 @@ function MoneyInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   );
 }
 
-function Confirmation({ summary, currency, onAnother }: { summary: SubmissionSummary; currency: string; onAnother: () => void }) {
+function Confirmation({ summary, currency, timezone, onAnother }: { summary: SubmissionSummary; currency: string; timezone: string; onAnother: () => void }) {
   return (
     <Card>
       <CardBody className="pt-8 text-center sm:px-10 sm:pt-10">
         <CheckCircle2 className="mx-auto size-12 text-kingdom-green" aria-hidden />
         <p className="mt-4 text-sm font-bold uppercase tracking-[0.14em] text-navy/55">Request submitted</p>
         <h2 className="tabular mt-2 font-serif text-4xl">{summary.requisition_number}</h2>
-        <p className="mx-auto mt-3 max-w-md text-navy/70">A confirmation has been emailed to you. Keep this number for reference — you can reply to the confirmation email with questions.</p>
+        <p className="mx-auto mt-3 max-w-md text-navy/70">
+          {summary.confirmation_emailed
+            ? "A confirmation has been emailed to you. Keep this number for reference — you can reply to the confirmation email with questions."
+            : "Your request has been sent to the Finance team for review. Keep this number for reference — include it if you contact the Finance team about this request."}
+        </p>
         <dl className="mx-auto mt-8 max-w-md divide-y divide-navy/10 text-left text-[15px]">
           {[
             ["Department", `${summary.department_name} · ${summary.subcategory_name}`],
             ["Request type", summary.request_type_name],
-            ["Submitted", formatDate(summary.submitted_at.slice(0, 10), "long")],
+            ["Submitted", formatTimestampDate(summary.submitted_at, timezone, "long")],
             ["Date needed", formatDate(summary.needed_by, "long")],
             ["Estimated total", formatMoney(summary.estimated_total, currency)],
             ["Status", "Submitted"],

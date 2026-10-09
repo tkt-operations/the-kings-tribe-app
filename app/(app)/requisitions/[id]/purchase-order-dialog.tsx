@@ -71,7 +71,7 @@ export function PurchaseOrderDialog({ requisitionId, items, currency }: { requis
   return (
     <>
       <Button onClick={() => setOpen(true)}><FilePlus2 className="size-4" aria-hidden /> Issue PO</Button>
-      <Dialog open={open} onClose={() => setOpen(false)} title="Issue Purchase Order" description="Only approved quantities not already on a Purchase Order can be included. A branded PDF is generated and emailed to the requester." wide>
+      <Dialog open={open} onClose={() => setOpen(false)} title="Issue Purchase Order" description="Only approved quantities not already on a Purchase Order can be included. A branded PDF is generated and, when email is set up, emailed to the requester." wide>
         <form
           ref={formRef}
           className="space-y-5"
@@ -121,7 +121,7 @@ export function PurchaseOrderDialog({ requisitionId, items, currency }: { requis
             <p className="text-sm">PO total <span className="tabular ml-2 font-serif text-2xl">{formatCents(total, currency)}</span></p>
             <div className="flex gap-2">
               <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-              <LoadingButton type="submit" variant="gold" pending={pending} pendingLabel="Issuing…">Issue & email PO</LoadingButton>
+              <LoadingButton type="submit" variant="gold" pending={pending} pendingLabel="Issuing…">Issue PO</LoadingButton>
             </div>
           </div>
         </form>
