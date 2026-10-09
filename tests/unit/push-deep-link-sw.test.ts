@@ -82,7 +82,7 @@ describe("notification tap: remembered destination", () => {
   it("still messages the page when navigate() is refused (iOS), after remembering", async () => {
     const w = loadWorker([{ url: `${ORIGIN}/dashboard`, navigate: "rejects" }]);
     await w.click(`/requisitions/${REQ}`);
-    expect(w.calls).toEqual([`remember ${PENDING_LINK_CACHE}`, `navigate /requisitions/${REQ}`, `postMessage /requisitions/${REQ}`]);
+    expect(w.calls).toEqual([`remember ${PENDING_LINK_CACHE}`, `navigate /requisitions/${REQ}`, `postMessage /requisitions/${REQ}`, `openWindow /requisitions/${REQ}`]);
   });
 
   it("the remembered destination survives a worker update (activate keeps it; old static caches go)", async () => {

@@ -163,6 +163,16 @@ async function openFromNotification(path) {
     } catch {
       // Nothing else to try for this window.
     }
+    // iOS installed apps: when the open window cannot be moved, openWindow() is
+    // what reliably brings the app to the requested in-app path (same origin,
+    // already allowlisted by safePath()).
+    if (self.clients.openWindow) {
+      try {
+        await self.clients.openWindow(target);
+      } catch {
+        // The message and the remembered destination remain.
+      }
+    }
     await focusClient(client);
     return;
   }
