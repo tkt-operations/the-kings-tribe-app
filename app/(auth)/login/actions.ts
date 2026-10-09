@@ -23,15 +23,21 @@ export async function signIn(_prev: AuthFormState, formData: FormData): Promise<
   }
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.auth.signInWithPassword({ email: parsed.data.email, password: parsed.data.password });
-  if (error) {
+  const { data: signedIn, error } = await supabase.auth.signInWithPassword({ email: parsed.data.email, password: parsed.data.password });
+  if (error || !signedIn.user) {
     // Same message for unknown user / wrong password (no account enumeration).
     return { error: "Sign in failed. Please check your email and password." };
   }
-  const { data: profile } = await supabase.from("profiles").select("is_active").maybeSingle();
+  const { data: profile } = await supabase.from("profiles").select("is_active, account_setup_completed_at").eq("id", signedIn.user.id).maybeSingle();
   if (profile && profile.is_active === false) {
     await supabase.auth.signOut();
     return { error: "Your account has been deactivated. Contact an administrator." };
+  }
+  // A password sign-in proves the person knows their own password (an invitee's
+  // temporary password is random and never shown), so setup is complete.
+  if (profile && !profile.account_setup_completed_at) {
+    const { error: setupError } = await supabase.rpc("mark_account_setup_complete", { p_method: "password_sign_in" });
+    if (setupError) console.error("Account setup marker failed", { code: setupError.code });
   }
   await setFlash("signed-in");
   redirect(safeRedirectPath(parsed.data.next));

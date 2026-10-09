@@ -3,7 +3,7 @@ import { Alert } from "@/components/ui/alert";
 import { requirePagePermission } from "@/lib/auth";
 import { createSupabaseAdminClient, isAdminClientConfigured } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { hasActivatedAccount } from "@/lib/user-state";
+import { isEmailConfirmed } from "@/lib/user-state";
 import { UserAdmin } from "./user-admin";
 
 export const metadata = { title: "Users" };
@@ -12,20 +12,23 @@ export default async function UsersPage() {
   const me = await requirePagePermission("users.manage");
   const supabase = await createSupabaseServerClient();
   const [{ data: profiles }, { data: roles }, { data: userRoles }] = await Promise.all([
-    supabase.from("profiles").select("id, email, full_name, is_active").order("full_name"),
+    supabase.from("profiles").select("id, email, full_name, is_active, account_setup_completed_at").order("full_name"),
     supabase.from("roles").select("id, key, name, description").order("is_system", { ascending: false }).order("name"),
     supabase.from("user_roles").select("user_id, role_id"),
   ]);
-  // Auth metadata (invitation accepted? last sign-in) comes from the server-only admin API.
-  const authInfo = new Map<string, { confirmed: boolean; lastSignIn: string | null }>();
+  // Auth metadata (email confirmed by Supabase? last sign-in) comes from the server-only admin API.
+  // It only decides which kind of setup link can be sent; setup completion is the profile's own field.
+  const authInfo = new Map<string, { emailConfirmed: boolean; lastSignIn: string | null }>();
   if (isAdminClientConfigured()) {
     const { data } = await createSupabaseAdminClient().auth.admin.listUsers({ perPage: 200 });
-    for (const u of data?.users ?? []) authInfo.set(u.id, { confirmed: hasActivatedAccount(u), lastSignIn: u.last_sign_in_at ?? null });
+    for (const u of data?.users ?? []) authInfo.set(u.id, { emailConfirmed: isEmailConfirmed(u), lastSignIn: u.last_sign_in_at ?? null });
   }
-  const users = ((profiles ?? []) as { id: string; email: string; full_name: string; is_active: boolean }[]).map((p) => ({
+  const users = ((profiles ?? []) as { id: string; email: string; full_name: string; is_active: boolean; account_setup_completed_at: string | null }[]).map(({ account_setup_completed_at, ...p }) => ({
     ...p,
     roleIds: ((userRoles ?? []) as { user_id: string; role_id: string }[]).filter((r) => r.user_id === p.id).map((r) => r.role_id),
-    confirmed: authInfo.get(p.id)?.confirmed ?? true,
+    setupCompleted: account_setup_completed_at !== null,
+    // Unknown (admin API unavailable): assume confirmed, so only the recovery path is offered.
+    emailConfirmed: authInfo.get(p.id)?.emailConfirmed ?? true,
     lastSignIn: authInfo.get(p.id)?.lastSignIn ?? null,
   }));
   return (
