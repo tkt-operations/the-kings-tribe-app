@@ -43,6 +43,24 @@ describe("invitation audit", () => {
     await expectError(as(db, "anon", null, () => db.query("select public.log_invitation_reissued($1, 'email')", [pending])), /permission denied/);
   });
 
+  it("minimum privileges: only authenticated may execute; definer with a fixed search_path; (uuid, text) only", async () => {
+    const f = await one<{ anon: boolean; authenticated: boolean; public_role: boolean; definer: boolean; config: string[]; args: string }>(db, `
+      select has_function_privilege('anon', p.oid, 'execute') as anon,
+             has_function_privilege('authenticated', p.oid, 'execute') as authenticated,
+             exists (select 1 from aclexplode(p.proacl) a where a.grantee = 0 and a.privilege_type = 'EXECUTE') as public_role,
+             p.prosecdef as definer, p.proconfig as config, pg_get_function_identity_arguments(p.oid) as args
+      from pg_proc p where p.oid = 'public.log_invitation_reissued(uuid, text)'::regprocedure`);
+    expect(f).toEqual({ anon: false, authenticated: true, public_role: false, definer: true, config: ["search_path=public, pg_temp"], args: "p_user_id uuid, p_delivery text" });
+    const overloads = await one<{ n: number }>(db, "select count(*)::int as n from pg_proc where proname = 'log_invitation_reissued'");
+    expect(overloads.n).toBe(1);
+  });
+
+  it("an inactive manager cannot call it", async () => {
+    const former = await createUser(db, "former-admin@example.org", ["administrator"]);
+    await db.query("update public.profiles set is_active = false where id = $1", [former]);
+    await expectError(as(db, "authenticated", former, () => db.query("select public.log_invitation_reissued($1, 'email')", [pending])), /permission denied/);
+  });
+
   it("rejects unknown deliveries and users", async () => {
     await expectError(as(db, "authenticated", admin, () => db.query("select public.log_invitation_reissued($1, 'https://x.invalid/?token=abc')", [pending])), /Invalid invitation delivery/);
     await expectError(as(db, "authenticated", admin, () => db.query("select public.log_invitation_reissued(gen_random_uuid(), 'email')")), /User not found/);

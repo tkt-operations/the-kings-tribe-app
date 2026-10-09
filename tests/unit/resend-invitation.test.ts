@@ -63,7 +63,7 @@ afterEach(() => { delete process.env.NEXT_PUBLIC_APP_URL; });
 describe("pending user", () => {
   it("email: Supabase re-sends the invitation to the same account", async () => {
     const r = await resendInvitation(PENDING, "email");
-    expect(r).toEqual({ ok: true, data: { link: undefined }, message: "Invitation sent." });
+    expect(r).toEqual({ ok: true, data: { link: undefined, auditRecorded: true }, message: "Invitation sent." });
     expect(inviteUserByEmail).toHaveBeenCalledTimes(1);
     expect(inviteUserByEmail).toHaveBeenCalledWith("jordan.hayes@demo.invalid", { redirectTo: REDIRECT });
     expect(generateLink).not.toHaveBeenCalled();
@@ -71,7 +71,7 @@ describe("pending user", () => {
 
   it("link: a replacement invite link is created and returned once", async () => {
     const r = await resendInvitation(PENDING, "link");
-    expect(r).toEqual({ ok: true, data: { link: ACTION_LINK }, message: "New invitation link created." });
+    expect(r).toEqual({ ok: true, data: { link: ACTION_LINK, auditRecorded: true }, message: "New invitation link created." });
     expect(generateLink).toHaveBeenCalledWith({ type: "invite", email: "jordan.hayes@demo.invalid", options: { redirectTo: REDIRECT } });
     expect(inviteUserByEmail).not.toHaveBeenCalled();
   });
@@ -155,12 +155,80 @@ describe("secrets never persisted or logged", () => {
     expect(writes).toEqual([]);
   });
 
-  it("the link is not logged, even when the audit write fails", async () => {
-    rpc.mockResolvedValueOnce({ data: null, error: { code: "42501", message: "permission denied" } });
+});
+
+describe("audit outcome", () => {
+  const auditFails = () => rpc.mockResolvedValueOnce({ data: null, error: { code: "42501", message: "permission denied for function log_invitation_reissued; raw detail" } });
+
+  it("email + audit succeeds → plain success", async () => {
+    expect(await resendInvitation(PENDING, "email")).toEqual({ ok: true, data: { link: undefined, auditRecorded: true }, message: "Invitation sent." });
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it("email + audit fails → invitation stands, truthful warning, safe log", async () => {
+    auditFails();
+    const r = await resendInvitation(PENDING, "email");
+    expect(r).toEqual({ ok: true, data: { link: undefined, auditRecorded: false }, message: "Invitation sent, but the audit record could not be written. Please contact an administrator." });
+    expect(inviteUserByEmail).toHaveBeenCalledTimes(1);
+    expect(consoleError).toHaveBeenCalledWith("Invitation audit failed", { delivery: "email", code: "42501" });
+    expect(logged()).not.toContain("raw detail");
+  });
+
+  it("link + audit succeeds → plain success with the link", async () => {
+    expect(await resendInvitation(PENDING, "link")).toEqual({ ok: true, data: { link: ACTION_LINK, auditRecorded: true }, message: "New invitation link created." });
+  });
+
+  it("link + audit fails → link still returned once, truthful warning, safe log", async () => {
+    auditFails();
     const r = await resendInvitation(PENDING, "link");
+    expect(r).toEqual({ ok: true, data: { link: ACTION_LINK, auditRecorded: false }, message: "New invitation link created, but the audit record could not be written. Please contact an administrator." });
+    expect(consoleError).toHaveBeenCalledWith("Invitation audit failed", { delivery: "link", code: "42501" });
+  });
+
+  it.each(["email", "link"] as const)("%s: neither the warning nor the log contains the token, link or email", async (how) => {
+    auditFails();
+    const r = await resendInvitation(PENDING, how);
+    expect(r.ok && r.message).toBeTruthy();
+    for (const text of [r.ok ? r.message : "", logged()]) {
+      expect(text).not.toContain(TOKEN);
+      expect(text).not.toContain("supabase.co");
+      expect(text).not.toContain("jordan.hayes");
+      expect(text).not.toContain("raw detail");
+    }
+  });
+});
+
+/**
+ * Email resend (inviteUserByEmail). Not sent for real. Behaviour mirrored from
+ * the Supabase Auth /invite handler (supabase/auth internal/api/invite.go):
+ * an existing user with email_confirmed_at = null is re-invited in place (no
+ * new user; new confirmation token; invited_at/confirmation_sent_at updated;
+ * `data` is ignored for existing users); a confirmed user gets 422
+ * `email_exists`. The SDK (auth-js 2.117.2) POSTs /invite with redirectTo as
+ * the redirect_to query parameter.
+ */
+describe("email resend semantics", () => {
+  it("existing pending user: re-invited in place, same id, roles/profile untouched", async () => {
+    const r = await resendInvitation(PENDING, "email");
     expect(r.ok).toBe(true);
-    expect(logged()).not.toContain(TOKEN);
-    expect(logged()).not.toContain(ACTION_LINK);
+    expect(getUserById).toHaveBeenCalledWith(PENDING);
+    expect(inviteUserByEmail).toHaveBeenCalledWith("jordan.hayes@demo.invalid", { redirectTo: REDIRECT });
+    expect(createUser).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
+  });
+
+  it("existing confirmed user: rejected before the provider, safe message", async () => {
+    authUser = { ...authUser, email_confirmed_at: "2026-10-01T12:00:00Z" };
+    expect(await resendInvitation(PENDING, "email")).toEqual({ ok: false, error: "This user has already activated their account. Use password reset instead." });
+    expect(inviteUserByEmail).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
+  });
+
+  it("provider email_exists race (accepted after our check): safe message, nothing audited or written", async () => {
+    inviteUserByEmail.mockResolvedValueOnce({ data: { user: null }, error: { code: "email_exists", status: 422, message: "A user with this email address has already been registered" } });
+    expect(await resendInvitation(PENDING, "email")).toEqual({ ok: false, error: "This user has already activated their account. Use password reset instead." });
+    expect(rpc).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
   });
 });
 

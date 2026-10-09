@@ -76,7 +76,7 @@ function invitationRedirect() {
  * Refused for activated users (use password reset) and for deactivated users
  * (reactivate first, so an invitation can never bypass a deactivation).
  */
-export async function resendInvitation(userId: string, delivery: "email" | "link"): Promise<ActionResult<{ link?: string }>> {
+export async function resendInvitation(userId: string, delivery: "email" | "link"): Promise<ActionResult<{ link?: string; auditRecorded: boolean }>> {
   try {
     await assertPermission("users.manage");
     const uid = z.uuid().parse(userId);
@@ -109,12 +109,20 @@ export async function resendInvitation(userId: string, delivery: "email" | "link
     const link = how === "link" ? (data as { properties?: { action_link?: string } }).properties?.action_link : undefined;
     if (how === "link" && !link) throw new ActionError(REISSUE_FAILED);
 
-    // Who re-issued it and how; never the link or token.
+    // Who re-issued it and how; never the link or token. The invitation has
+    // already been issued and is not rolled back if this fails — the manager is
+    // told plainly that the audit record is missing instead.
     const { error: auditError } = await supabase.rpc("log_invitation_reissued", { p_user_id: uid, p_delivery: how });
-    if (auditError) console.error("Invitation audit failed", { code: auditError.code });
+    const auditRecorded = !auditError;
+    if (auditError) console.error("Invitation audit failed", { delivery: how, code: auditError.code });
 
     revalidatePath("/admin/users");
-    return { ok: true, data: { link }, message: how === "email" ? "Invitation sent." : "New invitation link created." };
+    const done = how === "email" ? "Invitation sent" : "New invitation link created";
+    return {
+      ok: true,
+      data: { link, auditRecorded },
+      message: auditRecorded ? `${done}.` : `${done}, but the audit record could not be written. Please contact an administrator.`,
+    };
   } catch (e) {
     return fail(e);
   }

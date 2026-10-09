@@ -18,8 +18,27 @@ import { inviteUser, resendInvitation, setUserActive, setUserRole } from "./acti
 interface Role { id: string; key: string; name: string; description: string | null }
 interface UserRow { id: string; email: string; full_name: string; is_active: boolean; roleIds: string[]; lastSignIn: string | null; confirmed: boolean }
 
+const REISSUE_FAILED = "Unable to create a new invitation.";
+
+/**
+ * Call resendInvitation with the right feedback. When the invitation succeeded
+ * but its audit record could not be written, the server's warning is shown in
+ * the more prominent (error-styled) toast instead of a plain success.
+ */
+function reissue(toast: ReturnType<typeof useToast>, userId: string, how: "email" | "link") {
+  return async () => {
+    const r = await resendInvitation(userId, how);
+    if (r.ok) {
+      const text = r.message ?? (how === "email" ? "Invitation sent." : "New invitation link created.");
+      if (r.data.auditRecorded) toast.success(text); else toast.error(text);
+    }
+    return r;
+  };
+}
+
 export function UserAdmin({ users, roles, currentUserId }: { users: UserRow[]; roles: Role[]; currentUserId: string }) {
   const { pending, error, run } = useAction();
+  const toast = useToast();
   return (
     <div className="space-y-4">
       <div className="flex justify-end"><InviteDialog roles={roles} /></div>
@@ -43,7 +62,7 @@ export function UserAdmin({ users, roles, currentUserId }: { users: UserRow[]; r
                 {canReissueInvitation(state) && u.id !== currentUserId ? (
                   <div className="mt-2 flex flex-wrap gap-2">
                     <Button size="sm" variant="secondary" className="h-10" disabled={pending}
-                      onClick={() => run(() => resendInvitation(u.id, "email"), { successMessage: "Invitation sent.", errorMessage: "Unable to create a new invitation." })}>
+                      onClick={() => run(reissue(toast, u.id, "email"), { toast: false, errorMessage: REISSUE_FAILED, onError: (e) => toast.error(e) })}>
                       <Mail className="size-4" aria-hidden /> Resend invitation
                     </Button>
                     <ReplaceLinkDialog userId={u.id} name={name} disabled={pending} />
@@ -105,6 +124,8 @@ function CopyLinkButton({ link }: { link: string }) {
 function ReplaceLinkDialog({ userId, name, disabled }: { userId: string; name: string; disabled: boolean }) {
   const [open, setOpen] = useState(false);
   const [link, setLink] = useState<string | null>(null);
+  const [audited, setAudited] = useState(true);
+  const toast = useToast();
   const { pending, error, message, run } = useAction();
   function close() { setOpen(false); setLink(null); }
   return (
@@ -115,7 +136,9 @@ function ReplaceLinkDialog({ userId, name, disabled }: { userId: string; name: s
       <Dialog open={open} onClose={close} title="Replace invitation link" description={`Create a new invitation link for ${name}. Any earlier invitation link or email will stop working.`}>
         {link ? (
           <div className="space-y-4">
-            <Alert tone="success" title="New invitation link created">{message} Send it to them privately — it can only be used once and will not be shown again.</Alert>
+            {audited
+              ? <Alert tone="success" title="New invitation link created">{message} Send it to them privately — it can only be used once and will not be shown again.</Alert>
+              : <Alert tone="warning" title="Audit record not written">{message} The link below still works. Send it to them privately — it can only be used once and will not be shown again.</Alert>}
             <Input readOnly value={link} onFocus={(e) => e.target.select()} aria-label="Invitation link" />
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={close}>Done</Button>
@@ -128,11 +151,12 @@ function ReplaceLinkDialog({ userId, name, disabled }: { userId: string; name: s
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={close}>Cancel</Button>
               <LoadingButton pending={pending} pendingLabel="Creating…"
-                onClick={() => run(() => resendInvitation(userId, "link"), {
-                  successMessage: "New invitation link created.",
-                  errorMessage: "Unable to create a new invitation.",
+                onClick={() => run(reissue(toast, userId, "link"), {
+                  toast: false,
+                  errorMessage: REISSUE_FAILED,
                   refresh: false,
-                  onSuccess: (data) => { if (data?.link) setLink(data.link); },
+                  onError: (e) => toast.error(e),
+                  onSuccess: (data) => { setAudited(data.auditRecorded); if (data.link) setLink(data.link); },
                 })}>Create new link</LoadingButton>
             </div>
           </div>

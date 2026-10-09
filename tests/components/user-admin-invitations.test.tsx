@@ -68,7 +68,7 @@ describe("invitation actions by state", () => {
 
 describe("resend and replace", () => {
   it("Resend invitation emails via the server action and toasts", async () => {
-    resendInvitation.mockResolvedValue({ ok: true, data: {}, message: "Invitation sent." });
+    resendInvitation.mockResolvedValue({ ok: true, data: { auditRecorded: true }, message: "Invitation sent." });
     const { row } = renderAdmin();
     fireEvent.click(within(row("Jordan Hayes")).getByRole("button", { name: "Resend invitation" }));
     expect(await screen.findByText("Invitation sent.")).toBeTruthy();
@@ -76,7 +76,7 @@ describe("resend and replace", () => {
   });
 
   it("Replace invitation link shows the new link once, and forgets it on close", async () => {
-    resendInvitation.mockResolvedValue({ ok: true, data: { link: LINK }, message: "New invitation link created." });
+    resendInvitation.mockResolvedValue({ ok: true, data: { link: LINK, auditRecorded: true }, message: "New invitation link created." });
     const { row } = renderAdmin();
     fireEvent.click(within(row("Jordan Hayes")).getByRole("button", { name: "Replace invitation link" }));
     expect(resendInvitation).not.toHaveBeenCalled();
@@ -89,6 +89,48 @@ describe("resend and replace", () => {
     fireEvent.click(within(row("Jordan Hayes")).getByRole("button", { name: "Replace invitation link" }));
     expect(screen.queryByDisplayValue(LINK)).toBeNull();
     expect(screen.getByRole("button", { name: "Create new link" })).toBeTruthy();
+  });
+
+  const toastIn = async (live: "polite" | "assertive", text: string) => {
+    const region = await waitFor(() => screen.getAllByRole(live === "assertive" ? "alert" : "status").find((el) => el.getAttribute("aria-live") === live)!);
+    expect(await within(region).findByText(text)).toBeTruthy();
+  };
+
+  it("Resend invitation: audit succeeded → success toast", async () => {
+    resendInvitation.mockResolvedValue({ ok: true, data: { auditRecorded: true }, message: "Invitation sent." });
+    const { row } = renderAdmin();
+    fireEvent.click(within(row("Jordan Hayes")).getByRole("button", { name: "Resend invitation" }));
+    await toastIn("polite", "Invitation sent.");
+  });
+
+  it("Resend invitation: audit failed → prominent warning toast, not a plain success", async () => {
+    const warning = "Invitation sent, but the audit record could not be written. Please contact an administrator.";
+    resendInvitation.mockResolvedValue({ ok: true, data: { auditRecorded: false }, message: warning });
+    const { row } = renderAdmin();
+    fireEvent.click(within(row("Jordan Hayes")).getByRole("button", { name: "Resend invitation" }));
+    await toastIn("assertive", warning);
+    expect(screen.queryByText("Invitation sent.")).toBeNull();
+  });
+
+  it("Replace invitation link: audit failed → link still shown once, with the warning", async () => {
+    const warning = "New invitation link created, but the audit record could not be written. Please contact an administrator.";
+    resendInvitation.mockResolvedValue({ ok: true, data: { link: LINK, auditRecorded: false }, message: warning });
+    const { row } = renderAdmin();
+    fireEvent.click(within(row("Jordan Hayes")).getByRole("button", { name: "Replace invitation link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create new link" }));
+    expect(((await screen.findByLabelText("Invitation link")) as HTMLInputElement).value).toBe(LINK);
+    expect(screen.getByText("Audit record not written")).toBeTruthy();
+    expect(screen.queryByText("New invitation link created")).toBeNull();
+    await toastIn("assertive", warning);
+  });
+
+  it("Replace invitation link: audit succeeded → normal success panel", async () => {
+    resendInvitation.mockResolvedValue({ ok: true, data: { link: LINK, auditRecorded: true }, message: "New invitation link created." });
+    const { row } = renderAdmin();
+    fireEvent.click(within(row("Jordan Hayes")).getByRole("button", { name: "Replace invitation link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create new link" }));
+    expect(await screen.findByText("New invitation link created")).toBeTruthy();
+    expect(screen.queryByText("Audit record not written")).toBeNull();
   });
 
   it("shows the server's safe error message", async () => {
