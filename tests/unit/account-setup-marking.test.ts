@@ -17,6 +17,7 @@ const auth = {
   updateUser: vi.fn<(input: unknown) => Promise<{ data: { user: { id: string } | null }; error: unknown }>>(async () => ({ data: { user: { id: USER } }, error: null })),
   signInWithPassword: vi.fn<(input: unknown) => Promise<{ data: { user: { id: string } | null }; error: unknown }>>(async () => ({ data: { user: { id: USER } }, error: null })),
   signOut: vi.fn(async () => ({ error: null })),
+  resetPasswordForEmail: vi.fn<(email: string, opts: unknown) => Promise<{ data: object; error: unknown }>>(async () => ({ data: {}, error: null })),
 };
 const rpc = vi.fn<(fn: string, args: unknown) => Promise<{ data: string | null; error: unknown }>>(async () => ({ data: "2026-10-08T00:00:00Z", error: null }));
 const profileEq = vi.fn();
@@ -37,7 +38,7 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 const { updatePassword } = await import("@/app/auth/update-password/actions");
-const { signIn } = await import("@/app/(auth)/login/actions");
+const { signIn, requestPasswordReset } = await import("@/app/(auth)/login/actions");
 
 const fd = (values: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(values)) f.set(k, v); return f; };
 const PASSWORD = "a long enough password";
@@ -108,6 +109,22 @@ describe("password sign-in", () => {
     profile = { is_active: false, account_setup_completed_at: null };
     expect(await login()).toEqual({ error: "Your account has been deactivated. Contact an administrator." });
     expect(auth.signOut).toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("Forgot password request", () => {
+  it("asks Supabase for a recovery email that lands on the production callback", async () => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://ops.thekingstribe.org";
+    const r = await requestPasswordReset(undefined, fd({ email: "Invitee@Demo.Invalid" }));
+    expect(r).toEqual({ message: "If that email belongs to an account, a reset link is on its way." });
+    expect(auth.resetPasswordForEmail).toHaveBeenCalledWith("invitee@demo.invalid", { redirectTo: "https://ops.thekingstribe.org/auth/callback?next=/auth/update-password" });
+    delete process.env.NEXT_PUBLIC_APP_URL;
+  });
+
+  it("same response whether or not Supabase errors (no account enumeration); nothing marked", async () => {
+    auth.resetPasswordForEmail.mockResolvedValueOnce({ data: {}, error: { code: "over_email_send_rate_limit", status: 429 } });
+    expect(await requestPasswordReset(undefined, fd({ email: "someone@demo.invalid" }))).toEqual({ message: "If that email belongs to an account, a reset link is on its way." });
     expect(rpc).not.toHaveBeenCalled();
   });
 });

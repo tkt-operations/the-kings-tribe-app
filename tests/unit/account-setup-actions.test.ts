@@ -20,19 +20,24 @@ const EMAIL = "jordan.hayes@demo.invalid";
 const PROD = "https://ops.thekingstribe.org";
 const REDIRECT = `${PROD}/auth/callback?next=/auth/update-password`;
 const TOKEN = "a".repeat(56);
-const INVITE_LINK = `https://project.supabase.co/auth/v1/verify?token=${TOKEN}&type=invite&redirect_to=${encodeURIComponent(REDIRECT)}`;
-const RECOVERY_LINK = `https://project.supabase.co/auth/v1/verify?token=${TOKEN}&type=recovery&redirect_to=${encodeURIComponent(REDIRECT)}`;
+const HASH = "b1".repeat(28); // properties.hashed_token (hex)
+// Supabase's raw one-time action links: must never be returned to the UI.
+const RAW_INVITE = `https://project.supabase.co/auth/v1/verify?token=${TOKEN}&type=invite&redirect_to=${encodeURIComponent(REDIRECT)}`;
+const RAW_RECOVERY = `https://project.supabase.co/auth/v1/verify?token=${TOKEN}&type=recovery&redirect_to=${encodeURIComponent(REDIRECT)}`;
+// What the manager gets instead: our callback, token hash in the fragment.
+const INVITE_LINK = `${PROD}/auth/callback?next=/auth/update-password#token_hash=${HASH}&type=invite`;
+const RECOVERY_LINK = `${PROD}/auth/callback?next=/auth/update-password#token_hash=${HASH}&type=recovery`;
 const ALREADY = "This user has already activated their account. Use password reset instead.";
 
 type AuthUser = { id: string; email: string; email_confirmed_at: string | null; last_sign_in_at: string | null };
-type Result = { data: { user: { id: string } | null; properties?: { action_link?: string } | null }; error: unknown };
+type Result = { data: { user: { id: string } | null; properties?: { action_link?: string; hashed_token?: string; verification_type?: string } | null }; error: unknown };
 let authUser: AuthUser;
 let profile: { id: string; is_active: boolean; account_setup_completed_at: string | null } | null;
 
 const getUserById = vi.fn<(id: string) => Promise<{ data: { user: AuthUser | null }; error: unknown }>>(async () => ({ data: { user: authUser }, error: null }));
 const inviteUserByEmail = vi.fn<(email: string, opts: unknown) => Promise<Result>>(async () => ({ data: { user: { id: authUser.id } }, error: null }));
 const generateLink = vi.fn<(params: { type: string; email: string; options: unknown }) => Promise<Result>>(async (params) => ({
-  data: { user: { id: authUser.id }, properties: { action_link: params.type === "invite" ? INVITE_LINK : RECOVERY_LINK } }, error: null,
+  data: { user: { id: authUser.id }, properties: { action_link: params.type === "invite" ? RAW_INVITE : RAW_RECOVERY, hashed_token: HASH, verification_type: params.type } }, error: null,
 }));
 const resetPasswordForEmail = vi.fn<(email: string, opts: unknown) => Promise<{ data: object; error: unknown }>>(async () => ({ data: {}, error: null }));
 const createUser = vi.fn();
@@ -125,7 +130,7 @@ describe("pending setup, invitation already opened (Supabase confirmed + signed 
   });
 
   it("recovery link for a different account is refused", async () => {
-    generateLink.mockResolvedValueOnce({ data: { user: { id: MANAGER }, properties: { action_link: RECOVERY_LINK } }, error: null });
+    generateLink.mockResolvedValueOnce({ data: { user: { id: MANAGER }, properties: { action_link: RAW_RECOVERY, hashed_token: HASH, verification_type: "recovery" } }, error: null });
     expect(await sendAccountSetup(USER, "link")).toEqual({ ok: false, error: "Unable to create a recovery link." });
     expect(rpc).not.toHaveBeenCalled();
   });
@@ -219,6 +224,7 @@ describe("secrets never persisted or logged", () => {
     const safeTexts = [JSON.stringify(rpc.mock.calls), logged(), ...results.map((r) => (r.ok ? r.message ?? "" : r.error))];
     for (const text of safeTexts) {
       expect(text).not.toContain(TOKEN);
+      expect(text).not.toContain(HASH);
       expect(text).not.toContain("supabase.co");
       expect(text).not.toContain("jordan.hayes");
       expect(text).not.toContain("raw detail");
@@ -256,5 +262,39 @@ describe("provider errors return safe messages", () => {
     expect(await sendAccountSetup(USER, "email")).toEqual({ ok: false, error: "Unable to create a new invitation." });
     expect((await sendAccountSetup("not-a-uuid", "email")).ok).toBe(false);
     expect((await sendAccountSetup(USER, "sms" as never)).ok).toBe(false);
+  });
+});
+
+describe("protected links (no raw Supabase action_link)", () => {
+  it.each([["invite", unconfirmed, INVITE_LINK], ["recovery", openedInvite, RECOVERY_LINK]] as const)("%s link points at our callback with the hash in the fragment", async (_c, setup, expected) => {
+    setup();
+    const r = await sendAccountSetup(USER, "link");
+    const link = r.ok ? r.data.link! : "";
+    expect(link).toBe(expected);
+    expect(link.startsWith("https://ops.thekingstribe.org/auth/callback?next=/auth/update-password#")).toBe(true);
+    expect(link).not.toContain("supabase.co");
+    expect(link).not.toContain(TOKEN);
+    // The token hash is only in the fragment, which browsers never send to a server.
+    expect(new URL(link).search).toBe("?next=/auth/update-password");
+  });
+
+  it.each([
+    ["wrong verification type", { action_link: RAW_RECOVERY, hashed_token: HASH, verification_type: "magiclink" }],
+    ["missing hash", { action_link: RAW_RECOVERY, verification_type: "recovery" }],
+    ["malformed hash", { action_link: RAW_RECOVERY, hashed_token: "not-hex!", verification_type: "recovery" }],
+  ])("refuses to fall back to the raw link: %s", async (_label, properties) => {
+    openedInvite();
+    generateLink.mockResolvedValueOnce({ data: { user: { id: USER }, properties }, error: null });
+    const r = await sendAccountSetup(USER, "link");
+    expect(r).toEqual({ ok: false, error: "Unable to create a recovery link." });
+    expect(JSON.stringify(r)).not.toContain("supabase.co");
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("an invite link never becomes a recovery link for an unconfirmed user", async () => {
+    unconfirmed();
+    await sendAccountSetup(USER, "link");
+    expect(generateLink).toHaveBeenCalledTimes(1);
+    expect(generateLink.mock.calls[0][0].type).toBe("invite");
   });
 });

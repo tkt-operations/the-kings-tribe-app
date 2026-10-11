@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { assertPermission } from "@/lib/auth";
 import { ActionError, friendlyDbError, toActionError, type ActionResult } from "@/lib/action-result";
+import { buildSetupLink, type SetupLinkType } from "@/lib/auth/callback-link";
 import { publicEnv } from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -42,7 +43,7 @@ export async function inviteUser(input: z.input<typeof inviteSchema>): Promise<A
       const { data, error } = await admin.auth.admin.generateLink({ type: "invite", email: v.email, options: { redirectTo, data: { full_name: v.full_name } } });
       if (error) throw new ActionError(error.message.includes("already") ? "A user with that email already exists." : `Could not create the invitation: ${error.message}`);
       userId = data.user?.id;
-      link = data.properties?.action_link;
+      link = protectedLink(data, "invite");
     }
     if (!userId) throw new ActionError("The invitation was created but the user id was not returned.");
     const supabase = await createSupabaseServerClient();
@@ -50,6 +51,8 @@ export async function inviteUser(input: z.input<typeof inviteSchema>): Promise<A
     const { error: roleError } = await supabase.from("user_roles").insert(v.role_ids.map((role_id) => ({ user_id: userId, role_id })));
     if (roleError) throw new ActionError(friendlyDbError(roleError));
     revalidatePath("/admin/users");
+    // The account and roles exist; only the shareable link is missing.
+    if (v.delivery === "link" && !link) throw new ActionError("The team member was added, but the invitation link could not be created. Use Replace invitation link on their card.");
     return { ok: true, data: { link }, message: v.delivery === "email" ? `Team member invited successfully. An invitation was emailed to ${v.email}.` : "Team member invited successfully. Send them this invitation link privately — it can only be used once." };
   } catch (e) {
     return fail(e);
@@ -64,6 +67,22 @@ const RATE_LIMITED = "An email was sent to this person very recently. Please wai
 /** Where every invitation and recovery link lands: the callback signs them in, then they choose a password. */
 function invitationRedirect() {
   return `${publicEnv().appUrl}/auth/callback?next=/auth/update-password`;
+}
+
+/**
+ * A shareable setup link for a generateLink() result: our own /auth/callback
+ * with the token hash in the URL fragment — never Supabase's raw action_link,
+ * which a link-preview bot (e.g. facebookexternalhit) consumes with one GET.
+ * Returns undefined if Supabase did not return what we expect.
+ */
+function protectedLink(data: unknown, expected: SetupLinkType): string | undefined {
+  const props = (data as { properties?: { hashed_token?: string; verification_type?: string } } | null)?.properties;
+  if (!props?.hashed_token || props.verification_type !== expected) return undefined;
+  try {
+    return buildSetupLink(publicEnv().appUrl, props.hashed_token, expected);
+  } catch {
+    return undefined;
+  }
 }
 
 type AdminClient = ReturnType<typeof createSupabaseAdminClient>;
@@ -88,7 +107,7 @@ async function issueInvitation(admin: AdminClient, uid: string, email: string, h
   }
   // Must be the same account: never a new auth user.
   if (data.user?.id !== uid) throw new ActionError(REISSUE_FAILED);
-  const link = how === "link" ? (data as { properties?: { action_link?: string } }).properties?.action_link : undefined;
+  const link = how === "link" ? protectedLink(data, "invite") : undefined;
   if (how === "link" && !link) throw new ActionError(REISSUE_FAILED);
   return { confirmed: false as const, link };
 }
@@ -108,7 +127,7 @@ async function issueRecovery(admin: AdminClient, uid: string, email: string, how
   const { data, error } = await admin.auth.admin.generateLink({ type: "recovery", email, options: { redirectTo } });
   if (error) providerFailure(error, "Recovery link failed", RECOVERY_FAILED);
   if (data.user?.id !== uid) throw new ActionError(RECOVERY_FAILED);
-  const link = (data as { properties?: { action_link?: string } }).properties?.action_link;
+  const link = protectedLink(data, "recovery");
   if (!link) throw new ActionError(RECOVERY_FAILED);
   return { link };
 }
