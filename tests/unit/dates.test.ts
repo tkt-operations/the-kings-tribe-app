@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, formatDate, isIsoDate, mostRecentSunday, startOfQuarter, todayInTimezone } from "@/lib/dates";
+import { addDays, formatDate, formatTimestampDate, isIsoDate, mostRecentSunday, startOfQuarter, todayInTimezone } from "@/lib/dates";
 
 describe("dates", () => {
   it("validates ISO dates", () => {
@@ -23,5 +23,11 @@ describe("dates", () => {
   });
   it("never shifts calendar dates", () => {
     expect(formatDate("2026-10-04")).toBe("Oct 4, 2026");
+    expect(formatDate("2026-10-04", "numeric")).toBe("10/4/2026");
+  });
+  it("numeric timestamp dates use the church timezone at the UTC date boundary", () => {
+    expect(formatTimestampDate("2026-10-12T03:30:00Z", "America/Chicago", "numeric")).toBe("10/11/2026");
+    expect(formatTimestampDate("2026-10-12T03:30:00Z", "UTC", "numeric")).toBe("10/12/2026");
+    expect(formatTimestampDate("2026-10-12T05:00:00Z", "America/Chicago", "numeric")).toBe("10/12/2026");
   });
 });

@@ -52,7 +52,9 @@ export function startOfQuarter(isoDate: string): string {
   return `${isoDate.slice(0, 4)}-${String(qMonth).padStart(2, "0")}-01`;
 }
 
-export function formatDate(isoDate: string | null | undefined, style: "short" | "medium" | "long" = "medium"): string {
+export type DateStyle = "short" | "medium" | "long" | "numeric";
+
+export function formatDate(isoDate: string | null | undefined, style: DateStyle = "medium"): string {
   if (!isoDate) return "—";
   const date = new Date(`${isoDate.slice(0, 10)}T00:00:00Z`);
   if (Number.isNaN(date.getTime())) return "—";
@@ -61,7 +63,9 @@ export function formatDate(isoDate: string | null | undefined, style: "short" | 
       ? { month: "short", day: "numeric", timeZone: "UTC" }
       : style === "long"
         ? { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }
-        : { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" };
+        : style === "numeric"
+          ? { month: "numeric", day: "numeric", year: "numeric", timeZone: "UTC" }
+          : { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" };
   return new Intl.DateTimeFormat("en-US", options).format(date);
 }
 
@@ -85,7 +89,7 @@ export function dateInTimezone(timestamp: string, timezone: string): string {
 }
 
 /** A timestamp's calendar date in the church timezone, formatted like formatDate. */
-export function formatTimestampDate(timestamp: string | null | undefined, timezone: string, style: "short" | "medium" | "long" = "medium"): string {
+export function formatTimestampDate(timestamp: string | null | undefined, timezone: string, style: DateStyle = "medium"): string {
   if (!timestamp || Number.isNaN(new Date(timestamp).getTime())) return "—";
   return formatDate(dateInTimezone(timestamp, timezone), style);
 }

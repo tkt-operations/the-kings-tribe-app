@@ -30,8 +30,8 @@ const INVITE_LINK = "https://project.supabase.co/auth/v1/verify?token=secret-tok
 const RECOVERY_LINK = "https://project.supabase.co/auth/v1/verify?token=secret-token&type=recovery";
 const SETUP_BUTTONS = /invitation|recovery/i;
 
-function renderAdmin() {
-  render(<ToastProvider><UserAdmin users={users} roles={[]} currentUserId={ME} /></ToastProvider>);
+function renderAdmin(timezone = "America/Chicago") {
+  render(<ToastProvider><UserAdmin users={users} roles={[]} currentUserId={ME} timezone={timezone} /></ToastProvider>);
   return { row: (name: string) => screen.getByText(name).closest("li") as HTMLElement };
 }
 const toastIn = async (live: "polite" | "assertive", text: string) => {
@@ -81,6 +81,22 @@ describe("controls by state", () => {
     expect(within(r).queryByRole("button", { name: SETUP_BUTTONS })).toBeNull();
     expect(within(r).getByRole("button", { name: "Reactivate" })).toBeTruthy();
     expect(within(r).getByText("Reactivate this user before sending a new invitation.")).toBeTruthy();
+  });
+});
+
+describe("Last sign-in date (hydration-safe)", () => {
+  // Frankie signed in at 02:19 UTC on Oct 9: still Oct 8 (9:19 PM) in Chicago.
+  it("is the calendar date in the church timezone, not the UTC date", () => {
+    const r = renderAdmin("America/Chicago").row("Frankie Lee");
+    expect(within(r).getByText("Last sign-in 10/8/2026")).toBeTruthy();
+  });
+
+  // Together with the test above, this fails on any machine if the date ever
+  // depends on the runtime's own timezone again (React error #418: the server
+  // renders in UTC, the browser in local time).
+  it("follows the church timezone setting", () => {
+    const r = renderAdmin("UTC").row("Frankie Lee");
+    expect(within(r).getByText("Last sign-in 10/9/2026")).toBeTruthy();
   });
 });
 

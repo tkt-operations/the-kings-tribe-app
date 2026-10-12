@@ -11,6 +11,7 @@ import { useFieldErrors } from "@/components/ui/form-feedback";
 import { LoadingButton } from "@/components/ui/submit-button";
 import { useToast } from "@/components/ui/toast";
 import { useAction } from "@/components/ui/use-action";
+import { formatTimestampDate } from "@/lib/dates";
 import { setupChannel, userState, type SetupChannel } from "@/lib/user-state";
 import { rules, validate } from "@/lib/validation/form";
 import { inviteUser, sendAccountSetup, setUserActive, setUserRole } from "./actions";
@@ -60,7 +61,8 @@ function sendSetup(toast: ReturnType<typeof useToast>, userId: string, how: "ema
   };
 }
 
-export function UserAdmin({ users, roles, currentUserId }: { users: UserRow[]; roles: Role[]; currentUserId: string }) {
+/** `timezone` is the church timezone, so the server and the browser render identical dates. */
+export function UserAdmin({ users, roles, currentUserId, timezone }: { users: UserRow[]; roles: Role[]; currentUserId: string; timezone: string }) {
   const { pending, error, run } = useAction();
   const toast = useToast();
   return (
@@ -81,7 +83,7 @@ export function UserAdmin({ users, roles, currentUserId }: { users: UserRow[]; r
                 <div className="mt-1 flex flex-wrap gap-1.5">
                   {!u.is_active ? <Badge tone="negative">Deactivated</Badge> : null}
                   {!u.setupCompleted ? <Badge tone="attention">{u.emailConfirmed ? "Setup incomplete" : "Invitation pending"}</Badge> : null}
-                  {u.lastSignIn ? <span className="text-xs text-navy/50">Last sign-in {new Date(u.lastSignIn).toLocaleDateString()}</span> : null}
+                  {u.lastSignIn ? <span className="text-xs text-navy/50">Last sign-in {formatTimestampDate(u.lastSignIn, timezone, "numeric")}</span> : null}
                 </div>
                 {state === "deactivated_pending" ? <p className="mt-1 text-xs text-navy/60">Reactivate this user before sending a new invitation.</p> : null}
                 {channel ? (

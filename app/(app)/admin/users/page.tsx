@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
 import { requirePagePermission } from "@/lib/auth";
+import { getChurchSettings } from "@/lib/data/settings";
 import { createSupabaseAdminClient, isAdminClientConfigured } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isEmailConfirmed } from "@/lib/user-state";
@@ -11,10 +12,11 @@ export const metadata = { title: "Users" };
 export default async function UsersPage() {
   const me = await requirePagePermission("users.manage");
   const supabase = await createSupabaseServerClient();
-  const [{ data: profiles }, { data: roles }, { data: userRoles }] = await Promise.all([
+  const [{ data: profiles }, { data: roles }, { data: userRoles }, settings] = await Promise.all([
     supabase.from("profiles").select("id, email, full_name, is_active, account_setup_completed_at").order("full_name"),
     supabase.from("roles").select("id, key, name, description").order("is_system", { ascending: false }).order("name"),
     supabase.from("user_roles").select("user_id, role_id"),
+    getChurchSettings(),
   ]);
   // Auth metadata (email confirmed by Supabase? last sign-in) comes from the server-only admin API.
   // It only decides which kind of setup link can be sent; setup completion is the profile's own field.
@@ -35,7 +37,7 @@ export default async function UsersPage() {
     <>
       <PageHeader eyebrow="Administration" title="Users" description="Internal staff accounts. Each person can hold one or more roles; permissions are set per role." />
       {!isAdminClientConfigured() ? <Alert tone="warning" className="mb-4" title="Invitations need SUPABASE_SECRET_KEY">Add the server key to enable invitations.</Alert> : null}
-      <UserAdmin users={users} roles={(roles ?? []) as never} currentUserId={me.id} />
+      <UserAdmin users={users} roles={(roles ?? []) as never} currentUserId={me.id} timezone={settings?.timezone ?? "UTC"} />
     </>
   );
 }
