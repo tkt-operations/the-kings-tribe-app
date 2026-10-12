@@ -17,3 +17,10 @@ Rendered at 1600 × 1100 (exported at 2×: 3200 × 2200) with a generator script
 | S15 | `S15-tkt-training-home-screen-graphic.png` | TRAINING ILLUSTRATION | Home Screen with the app's real icon (`public/icons/apple-touch-icon.png`) and neutral placeholder tiles (not real apps) | TKT Training appears on the Home Screen; open it from there (not Safari) to sign in and use phone alerts | Icon grid and dock appearance |
 
 Related verified facts (from the training push test, 8 Oct 2026): iOS 16.4 or later is required; web push works only in the app added to the Home Screen; the alert text is generic and never shows amounts, items, names or other details; tapping an alert opens the exact requisition after sign-in.
+
+## Also: S07 (mobile) — Notifications on a phone
+
+| S-number | File | Type | Source / reference | Behaviour shown (verified) | May vary by iOS version |
+|---|---|---|---|---|---|
+| S07 (mobile) | `S07-notifications-mobile.png` | TRAINING ILLUSTRATION | Notifications page in the installed TKT Training app (`app/(app)/notifications/page.tsx`, `PushSettings` phase `on`, `NotificationItem`); replaces an earlier capture taken before phone alerts were configured, which showed the outdated "not available yet" state | Phone notifications **On for this device.** with **Turn off for this device**; filter chips All, Unread, Requisitions, Purchasing, Finance; two fictional seeded notifications (TKT-REQ-2026-0021, TKT-REQ-2026-0023). No diagnostics panel, device identifiers or push endpoints. The desktop S07 remains a real screenshot. | Status bar and frame are illustrative |
+

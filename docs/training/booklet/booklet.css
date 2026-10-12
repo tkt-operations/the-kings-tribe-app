@@ -1,0 +1,91 @@
+/* The Kings Tribe — training booklet (US Letter, fixed pages). Fonts are referenced from the repository. */
+@font-face { font-family: "Satoshi"; src: url("{{FONTS}}/Satoshi-Regular.woff2") format("woff2"); font-weight: 400; }
+@font-face { font-family: "Satoshi"; src: url("{{FONTS}}/Satoshi-Medium.woff2") format("woff2"); font-weight: 500; }
+@font-face { font-family: "Satoshi"; src: url("{{FONTS}}/Satoshi-Bold.woff2") format("woff2"); font-weight: 700; }
+@font-face { font-family: "DM Serif Display"; src: url("{{FONTS}}/DMSerifDisplay-Regular.ttf") format("truetype"); }
+:root { --navy: #12172d; --gold: #f3c94a; --blue: #3166dd; --orange: #fd5820; --green: #0d7050; --gray: #edf0f4; }
+@page { size: 8.5in 11in; margin: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: #fff; color: var(--navy); font-family: "Satoshi", Arial, sans-serif; font-size: 11.5px; line-height: 1.45; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+b { font-weight: 700; }
+.page { position: relative; width: 816px; height: 1056px; overflow: hidden; page-break-after: always; break-after: page; padding: 0 56px; }
+.hd { height: 62px; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid var(--gold); font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: rgba(18,23,45,.6); }
+.hd img { height: 22px; width: auto; }
+.content { position: absolute; top: 80px; bottom: 58px; left: 56px; right: 56px; display: flex; flex-direction: column; overflow: hidden; }
+.ft { position: absolute; left: 56px; right: 56px; bottom: 22px; height: 22px; display: flex; justify-content: space-between; align-items: center; font-size: 9px; color: rgba(18,23,45,.55); border-top: 1px solid var(--gray); padding-top: 6px; }
+.pgno { font-weight: 700; color: var(--navy); font-size: 11px; }
+
+/* cover */
+.cover { background: var(--navy); color: #fff; padding: 0; }
+.cv { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 80px; }
+.cvlogo { width: 230px; height: auto; margin-bottom: 44px; }
+.cvorg { color: var(--gold); font-weight: 700; letter-spacing: .32em; font-size: 15px; }
+.cvprod { font-family: "DM Serif Display", Georgia, serif; font-size: 52px; line-height: 1.05; margin-top: 10px; }
+.cvtitle { color: var(--gold); font-size: 22px; font-weight: 500; margin-top: 12px; }
+.cvmeta { margin-top: 36px; font-size: 13px; color: rgba(255,255,255,.75); }
+.cvchip { margin-top: 14px; display: inline-block; background: var(--gold); color: var(--navy); font-weight: 700; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; padding: 6px 14px; border-radius: 999px; }
+.cvfoot { position: absolute; bottom: 36px; left: 0; right: 0; text-align: center; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: rgba(255,255,255,.55); }
+
+/* headings */
+.opener { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+.opener .num { flex: none; width: 46px; height: 46px; border-radius: 12px; background: var(--navy); color: var(--gold); font-family: "DM Serif Display", Georgia, serif; font-size: 26px; display: flex; align-items: center; justify-content: center; }
+h1 { font-family: "DM Serif Display", Georgia, serif; font-weight: 400; font-size: 34px; line-height: 1.05; }
+.intro { font-size: 12px; color: rgba(18,23,45,.75); margin: -2px 0 10px; }
+h2 { font-family: "DM Serif Display", Georgia, serif; font-weight: 400; font-size: 25px; line-height: 1.1; margin-bottom: 8px; }
+h3 { font-family: "DM Serif Display", Georgia, serif; font-weight: 400; font-size: 19px; margin: 14px 0 6px; }
+h4 { font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase; color: rgba(18,23,45,.6); margin-bottom: 3px; }
+.sh { margin-top: 2px; }
+
+/* workflow */
+.facts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
+.facts > div { background: var(--gray); border-radius: 10px; padding: 8px 11px; }
+.cols { display: grid; grid-template-columns: 1.15fr 1fr; gap: 16px; margin-bottom: 10px; }
+.steps { list-style: none; counter-reset: s; display: grid; gap: 4px; }
+.steps li { counter-increment: s; position: relative; padding-left: 26px; }
+.steps li::before { content: counter(s); position: absolute; left: 0; top: 0; width: 18px; height: 18px; border-radius: 50%; background: var(--gold); font-weight: 700; font-size: 10.5px; display: flex; align-items: center; justify-content: center; }
+.next { border-left: 4px solid var(--green); padding: 2px 0 2px 10px; margin-bottom: 8px; }
+.notes ul, .bul { padding-left: 16px; display: grid; gap: 3px; }
+.notes { border-left: 4px solid var(--gold); padding: 2px 0 2px 10px; }
+.figs { flex: 1; min-height: 0; display: flex; gap: 14px; }
+.figs.single, .figs.stack { flex-direction: column; }
+.fig { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.imgbox { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.imgbox img { max-width: 100%; max-height: calc(100% - 24px); min-height: 0; width: auto; height: auto; border-radius: 8px; box-shadow: 0 0 0 1px rgba(18,23,45,.14), 0 6px 18px -8px rgba(18,23,45,.35); }
+.fig.graphic .imgbox img { box-shadow: 0 0 0 1px rgba(18,23,45,.10); }
+.fig.mobile .imgbox img, .fig.email .imgbox img { border-radius: 14px; }
+.figs.dm .fig.desktop { flex: 1.6; }
+.figs.dm .fig.mobile { flex: .55; }
+figcaption { flex: none; margin-top: 6px; font-size: 9.5px; color: rgba(18,23,45,.75); text-align: center; }
+.tag { display: inline-block; margin-right: 6px; padding: 1px 7px; border-radius: 999px; font-weight: 700; font-size: 8.5px; letter-spacing: .08em; text-transform: uppercase; background: var(--gray); color: var(--navy); }
+.tag.ill { background: #fff; box-shadow: 0 0 0 1.5px var(--gold) inset; }
+.tag.real { background: var(--green); color: #fff; }
+.tag.email { background: var(--blue); color: #fff; }
+.mobilelayout { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 300px; gap: 22px; }
+.mobilelayout .col { display: flex; flex-direction: column; gap: 6px; }
+.mobilelayout .facts { grid-template-columns: 1fr; }
+.fig.tall { height: 100%; }
+
+/* text pages */
+.text p { margin-bottom: 9px; font-size: 12px; }
+.text .bul { margin-bottom: 10px; font-size: 12px; }
+.callout { display: flex; gap: 10px; align-items: flex-start; border-radius: 10px; padding: 10px 12px; margin: 6px 0 12px; font-size: 11.5px; background: var(--gray); border-left: 5px solid var(--blue); }
+.callout span { flex: none; font-weight: 700; font-size: 9px; letter-spacing: .12em; padding-top: 2px; }
+.callout p { margin: 0 !important; font-size: 11.5px !important; }
+.callout.important { border-left-color: var(--orange); background: #fff1eb; }
+.callout.tip { border-left-color: var(--green); background: #e8f4ef; }
+.tbl { width: 100%; border-collapse: collapse; margin: 6px 0 14px; font-size: 11px; }
+.tbl th { text-align: left; background: var(--navy); color: #fff; font-weight: 700; padding: 7px 9px; font-size: 10px; letter-spacing: .06em; }
+.tbl td { padding: 7px 9px; border-bottom: 1px solid var(--gray); vertical-align: top; }
+.tbl td.k { font-weight: 700; white-space: nowrap; }
+.matrix td:not(.k), .matrix th:not(:first-child) { text-align: center; }
+.matrix td.k { white-space: normal; }
+.faq dt { font-weight: 700; font-size: 12px; margin-top: 10px; }
+.faq dd { font-size: 11.5px; color: rgba(18,23,45,.85); }
+.support { background: var(--navy); color: var(--gold); font-weight: 700; font-size: 16px; padding: 18px 20px; border-radius: 12px; margin: 6px 0 14px; text-align: center; }
+
+/* contents */
+.toc { list-style: none; margin-top: 10px; display: grid; gap: 2px; }
+.toc a { display: flex; align-items: baseline; gap: 10px; color: var(--navy); text-decoration: none; padding: 6px 0; font-size: 14px; }
+.toc .n { width: 26px; font-weight: 700; color: var(--gold); background: var(--navy); border-radius: 6px; text-align: center; font-size: 12px; padding: 2px 0; }
+.toc .dots { flex: 1; border-bottom: 1.5px dotted rgba(18,23,45,.3); transform: translateY(-4px); }
+.toc .pg { font-weight: 700; min-width: 26px; text-align: right; }
