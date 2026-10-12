@@ -4,9 +4,13 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { assertPermission } from "@/lib/auth";
 import { ActionError, friendlyDbError, toActionError, type ActionResult } from "@/lib/action-result";
+import { buildSetupLink, type SetupLinkType } from "@/lib/auth/callback-link";
+import { renderAccountSetupEmail } from "@/lib/email/account-setup";
+import { isEmailConfigured, sendEmail } from "@/lib/email/send";
 import { publicEnv } from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { isEmailConfirmed } from "@/lib/user-state";
 
 const inviteSchema = z.object({
   email: z.string().trim().toLowerCase().email("Enter a valid email"),
@@ -30,7 +34,7 @@ export async function inviteUser(input: z.input<typeof inviteSchema>): Promise<A
     await assertPermission("users.manage");
     const v = inviteSchema.parse(input);
     const admin = createSupabaseAdminClient();
-    const redirectTo = `${publicEnv().appUrl}/auth/callback?next=/auth/update-password`;
+    const redirectTo = invitationRedirect();
     let userId: string | undefined;
     let link: string | undefined;
     if (v.delivery === "email") {
@@ -41,7 +45,7 @@ export async function inviteUser(input: z.input<typeof inviteSchema>): Promise<A
       const { data, error } = await admin.auth.admin.generateLink({ type: "invite", email: v.email, options: { redirectTo, data: { full_name: v.full_name } } });
       if (error) throw new ActionError(error.message.includes("already") ? "A user with that email already exists." : `Could not create the invitation: ${error.message}`);
       userId = data.user?.id;
-      link = data.properties?.action_link;
+      link = protectedLink(data, "invite");
     }
     if (!userId) throw new ActionError("The invitation was created but the user id was not returned.");
     const supabase = await createSupabaseServerClient();
@@ -49,7 +53,163 @@ export async function inviteUser(input: z.input<typeof inviteSchema>): Promise<A
     const { error: roleError } = await supabase.from("user_roles").insert(v.role_ids.map((role_id) => ({ user_id: userId, role_id })));
     if (roleError) throw new ActionError(friendlyDbError(roleError));
     revalidatePath("/admin/users");
+    // The account and roles exist; only the shareable link is missing.
+    if (v.delivery === "link" && !link) throw new ActionError("The team member was added, but the invitation link could not be created. Use Replace invitation link on their card.");
     return { ok: true, data: { link }, message: v.delivery === "email" ? `Team member invited successfully. An invitation was emailed to ${v.email}.` : "Team member invited successfully. Send them this invitation link privately — it can only be used once." };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+const ALREADY_ACTIVATED = "This user has already activated their account. Use password reset instead.";
+const REISSUE_FAILED = "Unable to create a new invitation.";
+const RECOVERY_FAILED = "Unable to create a recovery link.";
+const RATE_LIMITED = "An email was sent to this person very recently. Please wait a minute and try again.";
+const SETUP_EMAIL_FAILED = "Unable to send the account setup email. Try again.";
+const SETUP_EMAIL_UNAVAILABLE = "Email is not configured, so the account setup email could not be sent. Use Create recovery link instead.";
+
+/** Where every invitation and recovery link lands: the callback signs them in, then they choose a password. */
+function invitationRedirect() {
+  return `${publicEnv().appUrl}/auth/callback?next=/auth/update-password`;
+}
+
+/**
+ * A shareable setup link for a generateLink() result: our own /auth/callback
+ * with the token hash in the URL fragment — never Supabase's raw action_link,
+ * which a link-preview bot (e.g. facebookexternalhit) consumes with one GET.
+ * Returns undefined if Supabase did not return what we expect.
+ */
+function protectedLink(data: unknown, expected: SetupLinkType): string | undefined {
+  const props = (data as { properties?: { hashed_token?: string; verification_type?: string } } | null)?.properties;
+  if (!props?.hashed_token || props.verification_type !== expected) return undefined;
+  try {
+    return buildSetupLink(publicEnv().appUrl, props.hashed_token, expected);
+  } catch {
+    return undefined;
+  }
+}
+
+type AdminClient = ReturnType<typeof createSupabaseAdminClient>;
+type ProviderError = { code?: string; status?: number } | null;
+
+function providerFailure(error: ProviderError, context: string, fallback: string): never {
+  if (error?.code === "over_email_send_rate_limit" || error?.status === 429) throw new ActionError(RATE_LIMITED);
+  console.error(context, { code: error?.code, status: error?.status });
+  throw new ActionError(fallback);
+}
+
+/** Supabase re-invites the same unconfirmed user: same id, new token, earlier link stops working. */
+async function issueInvitation(admin: AdminClient, uid: string, email: string, how: "email" | "link") {
+  const redirectTo = invitationRedirect();
+  const { data, error } = how === "email"
+    ? await admin.auth.admin.inviteUserByEmail(email, { redirectTo })
+    : await admin.auth.admin.generateLink({ type: "invite", email, options: { redirectTo } });
+  if (error) {
+    // Confirmed since we looked: the caller switches to a recovery link.
+    if (error.code === "email_exists") return { confirmed: true as const };
+    providerFailure(error, "Invitation re-issue failed", REISSUE_FAILED);
+  }
+  // Must be the same account: never a new auth user.
+  if (data.user?.id !== uid) throw new ActionError(REISSUE_FAILED);
+  const link = how === "link" ? protectedLink(data, "invite") : undefined;
+  if (how === "link" && !link) throw new ActionError(REISSUE_FAILED);
+  return { confirmed: false as const, link };
+}
+
+/**
+ * Recovery for an existing, confirmed user whose setup is incomplete. Supabase
+ * never creates a user here, and a new recovery token replaces the previous one.
+ *
+ * Both deliveries use admin generateLink(recovery) and our protected link
+ * (token hash in the fragment, confirm-first callback). For "email" the app
+ * sends its own "Complete your account setup" email through Resend, rather than
+ * resetPasswordForEmail(), which would send Supabase's "Reset your password"
+ * template — the wrong message for someone who never finished setting up.
+ * The link goes only to the email provider (or, for "link", back to the
+ * manager once); it is never logged or stored.
+ */
+async function issueRecovery(admin: AdminClient, uid: string, email: string, how: "email" | "link") {
+  const redirectTo = invitationRedirect();
+  const failed = how === "email" ? SETUP_EMAIL_FAILED : RECOVERY_FAILED;
+  if (how === "email" && !isEmailConfigured()) throw new ActionError(SETUP_EMAIL_UNAVAILABLE);
+  const { data, error } = await admin.auth.admin.generateLink({ type: "recovery", email, options: { redirectTo } });
+  if (error) providerFailure(error, "Recovery link failed", failed);
+  if (data.user?.id !== uid) throw new ActionError(failed);
+  const link = protectedLink(data, "recovery");
+  if (!link) throw new ActionError(failed);
+  if (how === "link") return { link };
+
+  const message = renderAccountSetupEmail(link, publicEnv().appUrl);
+  const sent = await sendEmail({ to: [email], subject: message.subject, html: message.html, text: message.text });
+  if (sent.status !== "sent") {
+    // Never report a link that was not delivered as sent. Status only in logs.
+    console.error("Account setup email not sent", { status: sent.status });
+    if (sent.status === "failed" && /429|rate|too many/i.test(sent.error)) throw new ActionError(RATE_LIMITED);
+    throw new ActionError(sent.status === "skipped" ? SETUP_EMAIL_UNAVAILABLE : SETUP_EMAIL_FAILED);
+  }
+  return { link: undefined };
+}
+
+export type AccountSetupResult = { link?: string; channel: "invite" | "recovery"; auditRecorded: boolean };
+
+/**
+ * Send a new setup link to someone whose account setup is not complete
+ * (profiles.account_setup_completed_at is null). The same auth user, profile,
+ * roles and audit history are kept; no account is ever created.
+ *
+ *  - Email not yet confirmed by Supabase → an invitation (email, or a link).
+ *  - Already confirmed (the invitation link was opened, but no password was
+ *    chosen) → Supabase refuses re-invitations, so a password recovery
+ *    (email, or a link) to the same destination instead.
+ *
+ * A link is returned once for the manager to send privately; it is never
+ * stored or logged. Refused for users who completed setup (Forgot password)
+ * and for deactivated users (reactivate first).
+ */
+export async function sendAccountSetup(userId: string, delivery: "email" | "link"): Promise<ActionResult<AccountSetupResult>> {
+  try {
+    await assertPermission("users.manage");
+    const uid = z.uuid().parse(userId);
+    const how = z.enum(["email", "link"]).parse(delivery);
+    const supabase = await createSupabaseServerClient();
+    const { data: profile } = await supabase.from("profiles").select("id, is_active, account_setup_completed_at").eq("id", uid).maybeSingle();
+    if (!profile) throw new ActionError("User not found.");
+    const p = profile as { is_active: boolean; account_setup_completed_at: string | null };
+    if (!p.is_active) throw new ActionError("Reactivate this user before sending a new invitation.");
+    if (p.account_setup_completed_at) throw new ActionError(ALREADY_ACTIVATED);
+
+    const admin = createSupabaseAdminClient();
+    const { data: found, error: lookupError } = await admin.auth.admin.getUserById(uid);
+    if (lookupError || !found.user?.email) {
+      console.error("Account setup lookup failed", { code: lookupError?.code, status: lookupError?.status });
+      throw new ActionError(REISSUE_FAILED);
+    }
+    const email = found.user.email;
+
+    let channel: "invite" | "recovery" = isEmailConfirmed(found.user) ? "recovery" : "invite";
+    let link: string | undefined;
+    if (channel === "invite") {
+      const invited = await issueInvitation(admin, uid, email, how);
+      if (invited.confirmed) channel = "recovery";
+      else link = invited.link;
+    }
+    if (channel === "recovery") link = (await issueRecovery(admin, uid, email, how)).link;
+
+    // Who sent it and how; never the link or token. The link/email has already
+    // gone out and is not rolled back if this fails — the manager is told.
+    const { error: auditError } = await supabase.rpc(channel === "invite" ? "log_invitation_reissued" : "log_account_recovery_issued", { p_user_id: uid, p_delivery: how });
+    const auditRecorded = !auditError;
+    if (auditError) console.error("Account setup audit failed", { channel, delivery: how, code: auditError.code });
+
+    revalidatePath("/admin/users");
+    const done = channel === "invite"
+      ? (how === "email" ? "Invitation sent" : "New invitation link created")
+      : (how === "email" ? "Setup email sent" : "Recovery link created");
+    return {
+      ok: true,
+      data: { link, channel, auditRecorded },
+      message: auditRecorded ? `${done}.` : `${done}, but the audit record could not be written. Please contact an administrator.`,
+    };
   } catch (e) {
     return fail(e);
   }

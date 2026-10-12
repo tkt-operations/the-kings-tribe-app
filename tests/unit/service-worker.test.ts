@@ -188,5 +188,7 @@ describe("service worker: notification click opens the exact destination", () =>
     const w = loadWorker({ windows: [{ url: `${ORIGIN}/requisitions`, navigate: "missing" }] });
     await w.run("notificationclick", click("https://evil.example.com/steal"));
     expect(w.windows[0].postMessage).toHaveBeenCalledWith({ type: "tkt:navigate", url: "/notifications" });
+    // openWindow() also only ever receives the same-origin allowlisted path.
+    expect(w.openWindow).toHaveBeenCalledWith(`${ORIGIN}/notifications`);
   });
 });

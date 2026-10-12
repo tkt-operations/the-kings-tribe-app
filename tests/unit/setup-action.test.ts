@@ -15,13 +15,14 @@ const admin = {
   rpc: vi.fn(),
   auth: { admin: { createUser: vi.fn(), deleteUser: vi.fn() } },
 };
-const signInWithPassword = vi.fn();
+const signInWithPassword = vi.fn(async () => ({ data: { user: { id: "00000000-0000-4000-8000-000000000001" } }, error: null as unknown }));
+const serverRpc = vi.fn(async () => ({ data: "2026-10-08T00:00:00Z", error: null }));
 
 vi.mock("next/navigation", () => ({ redirect: (p: string) => redirect(p) }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ set: cookieSet }) }));
 vi.mock("@/lib/server-env", () => ({ serverEnv: () => ({ setupToken: TOKEN }) }));
 vi.mock("@/lib/supabase/admin", () => ({ createSupabaseAdminClient: () => admin }));
-vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: async () => ({ auth: { signInWithPassword } }) }));
+vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: async () => ({ auth: { signInWithPassword }, rpc: serverRpc }) }));
 
 const { createFirstAdministrator } = await import("@/app/setup/actions");
 
@@ -88,5 +89,16 @@ describe("createFirstAdministrator", () => {
     await expect(createFirstAdministrator(undefined, form())).rejects.toMatchObject({ digest: expect.stringContaining("NEXT_REDIRECT") });
     expect(cookieSet).toHaveBeenCalledWith("tkt_flash", "admin-created", expect.objectContaining({ path: "/", httpOnly: false, maxAge: 60 }));
     expect(redirect).toHaveBeenCalledWith("/admin/setup");
+  });
+
+  it("marks the first administrator's account setup complete (they chose this password)", async () => {
+    await expect(createFirstAdministrator(undefined, form())).rejects.toMatchObject({ digest: expect.stringContaining("NEXT_REDIRECT") });
+    expect(serverRpc).toHaveBeenCalledWith("mark_account_setup_complete", { p_method: "password_set" });
+  });
+
+  it("does not mark setup complete when the follow-up sign-in fails", async () => {
+    signInWithPassword.mockResolvedValueOnce({ data: { user: null } as never, error: { code: "invalid_credentials" } });
+    await expect(createFirstAdministrator(undefined, form())).rejects.toMatchObject({ digest: expect.stringContaining("NEXT_REDIRECT") });
+    expect(serverRpc).not.toHaveBeenCalled();
   });
 });

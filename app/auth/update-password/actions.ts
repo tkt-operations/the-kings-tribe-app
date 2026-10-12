@@ -31,6 +31,11 @@ export async function updatePassword(_prev: UpdatePasswordState, formData: FormD
     console.error("Password update failed", { code: error.code, status: error.status });
     return { error: "Unable to update your password. Please try again." };
   }
+  // Only now has the person really finished setting up their account. Supabase
+  // marks invitees confirmed and signed in as soon as the link is opened, so
+  // this app-level marker is what the Users page relies on.
+  const { error: setupError } = await supabase.rpc("mark_account_setup_complete", { p_method: "password_set" });
+  if (setupError) console.error("Account setup marker failed", { code: setupError.code });
   if (parsed.data.full_name) {
     const { error: profileError } = await supabase.from("profiles").update({ full_name: parsed.data.full_name }).eq("id", auth.user.id);
     if (profileError) console.error("Profile name update failed", { code: profileError.code, message: profileError.message });
