@@ -74,6 +74,8 @@ Passwords are kept in a password manager, never in the repo.
 
 ## Capture fixtures (prepared in the app, not by the seed)
 - **S39 user states:** *Jordan Hayes* (`jordan.hayes@training.invalid`, Viewer) — invited with copy-link delivery and never accepted, so it shows **Invitation pending**; *Drew Santos* (`drew.santos@training.invalid`, Finance User) — a former team member, **Deactivated**. Both were created as Morgan in Admin → Users; no invitation email was sent.
+- **Setup incomplete:** *Frankie Lee* (`frankie.lee@training.invalid`, Viewer) — someone who opened their invitation but never chose a password, for **Setup incomplete**, **Send setup email** and **Create recovery link**. To prepare it (after the account setup migration is on the training database): as Morgan, invite Frankie with **Give me a link to send myself**; open that link in a private window, press **Continue**, then close the window on the choose-password page without saving. Supabase then shows the email as confirmed, and the seed keeps Frankie's setup incomplete. No email is sent.
+- **Account setup state:** every seed run marks Morgan, Taylor, Riley, Sam and Casey as setup complete (by name, 15 minutes after each account was created) and keeps Jordan, Drew and Frankie not complete.
 - **Requester walkthrough link:** "Training Requester Walkthrough" (all departments, 14 days, 10 submissions) for S41, S42, S46–S53, S55, S56 and M5. Its address is stored only in the git-ignored `.env.training.capture.local` (`TRAINING_REQUEST_LINK`) for capture automation; never share it, and revoke it after the capture sessions.
 - **Sample receipts and requester emails:** see `docs/training/assets/README.md`.
 

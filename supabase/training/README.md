@@ -17,6 +17,8 @@ Scenarios: `priority_mix`, `review_take_1..3`, `ready_for_po`, `ready_for_po_dir
 
 Not seeded: **Reimbursement**. The database requires a real uploaded receipt file on submission, so prepare it through the training request form with the sample receipt. Emailed receipts and SMS are not part of the verified training workflow.
 
+**Account setup state:** every run (any scenario) sets `profiles.account_setup_completed_at` by name, never from sessions: complete for Morgan Ellis, Taylor Brooks, Riley Chen, Sam Patel and Casey Rivera (15 minutes after the account was created; existing values are kept), and never complete for the capture fixtures Jordan Hayes, Drew Santos and Frankie Lee. Needs migration `20261012000100_account_setup_state`; the seed stops with a clear message without it.
+
 Prerequisite: active users Morgan Ellis (Administrator), Taylor Brooks (Head of Finance), Riley Chen (Finance User) and Sam Patel (Reporting User), created in the app with copy-link invitations. Tested locally in PGlite (`tests/db/training-seed.test.ts`, `tests/db/training-sql-execution.test.ts`) and seeded into the training project.
 
 **Dates:** after the workflow runs, `pg_temp.tkt_retime` gives each requisition a consistent timeline (submission → review → PO → order → receipt → purchase → close, in order, ending before now; needed-by two weeks after submission). Only the append-only audit log keeps the real seed time.

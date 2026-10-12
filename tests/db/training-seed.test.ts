@@ -224,3 +224,77 @@ describe("training seed and reset", () => {
     expect(await count(db, "select 1 from public.requisitions where is_demo")).toBe(0);
   });
 });
+
+describe("training seed: account setup state (Administration → Users)", () => {
+  let db: Db;
+  let ids: Record<string, string>;
+  const setupOf = async (name: string) =>
+    (await one<{ at: string | null; due: string | null }>(db,
+      "select account_setup_completed_at::text as at, (created_at + interval '15 minutes')::text as due from public.profiles where full_name = $1", [name]));
+
+  beforeAll(async () => {
+    db = await createTestDatabase();
+    await setChurchName(db, "The Kings Tribe (TRAINING)");
+    const staff = await createTrainingStaff(db);
+    // Capture fixtures, as prepared in the app.
+    const jordan = await createUser(db, "jordan.hayes@training.invalid", ["viewer"], "Jordan Hayes");
+    await db.query("update auth.users set invited_at = now() where id = $1", [jordan]);
+    const drew = await createUser(db, "drew.santos@training.invalid", ["finance_user"], "Drew Santos");
+    await db.query("update auth.users set invited_at = now(), email_confirmed_at = now() where id = $1", [drew]);
+    await db.query("update public.profiles set is_active = false where id = $1", [drew]);
+    // Opened the invitation (Supabase confirms the email and starts a session) but never chose a password.
+    const frankie = await createUser(db, "frankie.lee@training.invalid", ["viewer"], "Frankie Lee");
+    await db.query("update auth.users set invited_at = now(), email_confirmed_at = now(), last_sign_in_at = now() where id = $1", [frankie]);
+    // Even a live password session does not make a fixture complete: the seed decides by name only.
+    const { id: session } = await one<{ id: string }>(db, "insert into auth.sessions (user_id) values ($1) returning id", [frankie]);
+    await db.query("insert into auth.mfa_amr_claims (session_id, authentication_method) values ($1, 'password')", [session]);
+    ids = { ...staff, jordan, drew, frankie };
+    // A stale marker on a fixture (e.g. left over from practice) is cleared.
+    await db.query("update public.profiles set account_setup_completed_at = now() where id = $1", [frankie]);
+    await db.exec(sql("seed_training.sql", "on_hold_example"));
+  });
+
+  it("marks exactly the five training staff complete, at a deterministic time", async () => {
+    for (const name of ["Morgan Ellis", "Taylor Brooks", "Riley Chen", "Sam Patel", "Casey Rivera"]) {
+      const { at, due } = await setupOf(name);
+      expect([name, at]).toEqual([name, due]);
+    }
+  });
+
+  it("leaves the fixtures not complete: Invitation pending, Deactivated, Setup incomplete", async () => {
+    for (const name of ["Jordan Hayes", "Drew Santos", "Frankie Lee"]) expect([name, (await setupOf(name)).at]).toEqual([name, null]);
+    const states = await db.query<{ full_name: string; is_active: boolean; confirmed: boolean }>(
+      "select p.full_name, p.is_active, u.email_confirmed_at is not null as confirmed from public.profiles p join auth.users u on u.id = p.id where p.full_name in ('Jordan Hayes', 'Drew Santos', 'Frankie Lee') order by p.full_name");
+    expect(states.rows).toEqual([
+      { full_name: "Drew Santos", is_active: false, confirmed: true },
+      { full_name: "Frankie Lee", is_active: true, confirmed: true },
+      { full_name: "Jordan Hayes", is_active: true, confirmed: false },
+    ]);
+  });
+
+  it("is idempotent: re-seeding never moves a completed time and never completes a fixture", async () => {
+    const before = await db.query("select full_name, account_setup_completed_at from public.profiles order by full_name");
+    await db.exec(sql("seed_training.sql", "on_hold_example"));
+    expect((await db.query("select full_name, account_setup_completed_at from public.profiles order by full_name")).rows).toEqual(before.rows);
+    expect(await count(db, "select 1 from public.requisitions where submission_fingerprint = 'training:on_hold_example'")).toBe(1);
+  });
+
+  it("never marks a deactivated staff member complete", async () => {
+    await db.query("update public.profiles set is_active = false, account_setup_completed_at = null where id = $1", [ids.casey]);
+    await db.exec(sql("seed_training.sql", "on_hold_example"));
+    expect((await setupOf("Casey Rivera")).at).toBeNull();
+  });
+
+  it("uses only fictional .invalid addresses", async () => {
+    expect(await count(db, "select 1 from public.profiles where email not like '%@training.invalid'")).toBe(0);
+  });
+});
+
+it("training seed stops with a clear message, writing nothing, if the account setup migration is missing", async () => {
+  const db = await createTestDatabase();
+  await setChurchName(db, "The Kings Tribe (TRAINING)");
+  await createTrainingStaff(db);
+  await db.exec("alter table public.profiles drop column account_setup_completed_at cascade");
+  await expectError(db.exec(sql("seed_training.sql")), /apply the database migrations to the training project first/);
+  expect(await count(db, "select 1 from public.requisitions")).toBe(0);
+});

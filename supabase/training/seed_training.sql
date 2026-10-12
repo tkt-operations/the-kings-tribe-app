@@ -25,6 +25,8 @@
 --     Morgan Ellis (Administrator), Taylor Brooks (Head of Finance),
 --     Riley Chen (Finance User), Sam Patel (Reporting User).
 --   Casey Rivera (Viewer) is used for screenshots only and is not required here.
+--   Every run also sets the account setup state shown in Administration → Users
+--   (see "Account setup state" below); it needs the 20261012000100 migration.
 --
 -- Fictional external requester for every request: Jamie Carter.
 -- =============================================================================
@@ -271,6 +273,29 @@ begin
   if v_sam is null then v_missing := array_append(v_missing, 'Sam Patel (Reporting User)'); end if;
   if cardinality(v_missing) > 0 then
     raise exception 'Training seed: create these active training users in the app first: %', array_to_string(v_missing, '; ');
+  end if;
+
+  -- ---- Account setup state (Administration → Users) -------------------------
+  -- Set explicitly by name, never inferred from sessions or sign-ins, so every
+  -- (re)seed gives the same picture. Runs as no signed-in user, which the
+  -- profile guard allows (as for migrations and the service role).
+  --   Setup complete: the five training staff, 15 minutes after their account
+  --   was created. Rows already set are left alone.
+  --   Never complete (capture fixtures prepared in the app, see
+  --   docs/training/TRAINING-ENVIRONMENT.md): Jordan Hayes (Invitation pending),
+  --   Drew Santos (Deactivated), Frankie Lee (Setup incomplete).
+  if not exists (select 1 from information_schema.columns
+                  where table_schema = 'public' and table_name = 'profiles' and column_name = 'account_setup_completed_at') then
+    raise exception 'Training seed: apply the database migrations to the training project first (profiles.account_setup_completed_at is missing).';
+  end if;
+  perform pg_temp.tkt_as(null);
+  update public.profiles set account_setup_completed_at = created_at + interval '15 minutes'
+   where full_name in ('Morgan Ellis', 'Taylor Brooks', 'Riley Chen', 'Sam Patel', 'Casey Rivera')
+     and is_active and account_setup_completed_at is null;
+  update public.profiles set account_setup_completed_at = null
+   where full_name in ('Jordan Hayes', 'Drew Santos', 'Frankie Lee') and account_setup_completed_at is not null;
+  if not exists (select 1 from public.profiles where full_name = 'Frankie Lee' and is_active) then
+    raise notice 'Training seed: the Setup incomplete fixture (Frankie Lee) is not prepared yet. See docs/training/TRAINING-ENVIRONMENT.md.';
   end if;
 
   -- ---- A training-only requisition link, revoked again at the end -----------
