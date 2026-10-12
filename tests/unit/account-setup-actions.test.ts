@@ -45,6 +45,11 @@ vi.mock("@/lib/supabase/admin", () => ({
   createSupabaseAdminClient: () => ({ auth: { resetPasswordForEmail, admin: { getUserById, inviteUserByEmail, generateLink, createUser } } }),
 }));
 
+// The app's own Resend helper: the only place the setup link is sent.
+const sendEmail = vi.fn<(m: { to: string[]; subject: string; html: string; text: string }) => Promise<{ status: "sent"; id: string } | { status: "failed"; error: string } | { status: "skipped"; reason: string }>>(async () => ({ status: "sent", id: "email-1" }));
+const isEmailConfigured = vi.fn(() => true);
+vi.mock("@/lib/email/send", () => ({ sendEmail: (m: never) => sendEmail(m), isEmailConfigured: () => isEmailConfigured() }));
+
 // Every table write goes through here, so we can prove profiles and roles are untouched.
 const writes: { table: string; op: string }[] = [];
 const rpc = vi.fn<(fn: string, args: unknown) => Promise<{ data: null; error: unknown }>>(async () => ({ data: null, error: null }));
@@ -66,7 +71,7 @@ const { sendAccountSetup } = await import("@/app/(app)/admin/users/actions");
 
 const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 const logged = () => JSON.stringify(consoleError.mock.calls);
-const providerCalls = () => JSON.stringify([inviteUserByEmail.mock.calls, generateLink.mock.calls, resetPasswordForEmail.mock.calls]);
+const providerCalls = () => JSON.stringify([inviteUserByEmail.mock.calls, generateLink.mock.calls, resetPasswordForEmail.mock.calls, sendEmail.mock.calls]);
 
 const unconfirmed = () => { authUser = { id: USER, email: EMAIL, email_confirmed_at: null, last_sign_in_at: null }; };
 // What Supabase leaves behind when an invitation link is opened but no password is chosen.
@@ -75,7 +80,7 @@ const openedInvite = () => { authUser = { id: USER, email: EMAIL, email_confirme
 beforeEach(() => {
   vi.clearAllMocks();
   // Also drop any unconsumed mockResolvedValueOnce results (back to the vi.fn defaults).
-  for (const m of [getUserById, inviteUserByEmail, generateLink, resetPasswordForEmail, rpc]) m.mockReset();
+  for (const m of [getUserById, inviteUserByEmail, generateLink, resetPasswordForEmail, rpc, sendEmail, isEmailConfigured]) m.mockReset();
   writes.length = 0;
   process.env.NEXT_PUBLIC_APP_URL = `${PROD}/`;
   unconfirmed();
@@ -104,11 +109,20 @@ describe("pending setup, invitation never opened → invitation", () => {
 describe("pending setup, invitation already opened (Supabase confirmed + signed in) → recovery, never invite", () => {
   beforeEach(openedInvite);
 
-  it("email: recovery email via the admin client; inviteUserByEmail is never called", async () => {
-    expect(await sendAccountSetup(USER, "email")).toEqual({ ok: true, data: { link: undefined, channel: "recovery", auditRecorded: true }, message: "Recovery email sent." });
-    expect(resetPasswordForEmail).toHaveBeenCalledWith(EMAIL, { redirectTo: REDIRECT });
+  it("email: the app's own setup email with the protected link — not Supabase's Reset password email", async () => {
+    expect(await sendAccountSetup(USER, "email")).toEqual({ ok: true, data: { link: undefined, channel: "recovery", auditRecorded: true }, message: "Setup email sent." });
+    expect(resetPasswordForEmail).not.toHaveBeenCalled();
     expect(inviteUserByEmail).not.toHaveBeenCalled();
-    expect(generateLink).not.toHaveBeenCalled();
+    expect(generateLink).toHaveBeenCalledTimes(1);
+    expect(generateLink).toHaveBeenCalledWith({ type: "recovery", email: EMAIL, options: { redirectTo: REDIRECT } });
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    const mail = sendEmail.mock.calls[0][0];
+    expect(mail.to).toEqual([EMAIL]);
+    expect(mail.subject).toBe("Complete your account setup | The Kings Tribe Operations");
+    expect(mail.text).toContain(RECOVERY_LINK);
+    expect(mail.html).toContain(RECOVERY_LINK.replaceAll("&", "&amp;"));
+    expect(mail.html + mail.text).not.toContain("supabase.co");
+    expect(mail.html + mail.text).not.toContain(TOKEN);
   });
 
   it("link: a recovery link for the same user, returned once", async () => {
@@ -140,11 +154,13 @@ describe("race: confirmed between page load and click", () => {
   it.each(["email", "link"] as const)("%s: email_exists from the invite API falls back to recovery for the same user", async (how) => {
     const exists = { code: "email_exists", status: 422, message: "A user with this email address has already been registered" };
     inviteUserByEmail.mockResolvedValueOnce({ data: { user: null }, error: exists });
-    generateLink.mockResolvedValueOnce({ data: { user: null, properties: null }, error: exists });
+    // For "link" the first generateLink (invite) reports the race; for "email" inviteUserByEmail does.
+    if (how === "link") generateLink.mockResolvedValueOnce({ data: { user: null, properties: null }, error: exists });
     const r = await sendAccountSetup(USER, how);
     expect(r.ok && r.data.channel).toBe("recovery");
-    if (how === "email") expect(resetPasswordForEmail).toHaveBeenCalledWith(EMAIL, { redirectTo: REDIRECT });
-    else expect(generateLink).toHaveBeenLastCalledWith({ type: "recovery", email: EMAIL, options: { redirectTo: REDIRECT } });
+    expect(generateLink).toHaveBeenLastCalledWith({ type: "recovery", email: EMAIL, options: { redirectTo: REDIRECT } });
+    expect(resetPasswordForEmail).not.toHaveBeenCalled();
+    if (how === "email") expect(sendEmail).toHaveBeenCalledTimes(1);
     expect(createUser).not.toHaveBeenCalled();
   });
 });
@@ -154,7 +170,7 @@ describe("account setup completed (active)", () => {
     profile = { id: USER, is_active: true, account_setup_completed_at: "2026-10-01T00:00:00Z" };
     expect(await sendAccountSetup(USER, how)).toEqual({ ok: false, error: ALREADY });
     expect(getUserById).not.toHaveBeenCalled();
-    expect(providerCalls()).toBe("[[],[],[]]");
+    expect(providerCalls()).toBe("[[],[],[],[]]");
   });
 });
 
@@ -165,7 +181,7 @@ describe("deactivated", () => {
       expect(await sendAccountSetup(USER, how)).toEqual({ ok: false, error: "Reactivate this user before sending a new invitation." });
     }
     expect(getUserById).not.toHaveBeenCalled();
-    expect(providerCalls()).toBe("[[],[],[]]");
+    expect(providerCalls()).toBe("[[],[],[],[]]");
   });
 
   it("unknown user is refused", async () => {
@@ -193,7 +209,8 @@ describe("production redirect", () => {
     openedInvite();
     await sendAccountSetup(USER, "email");
     await sendAccountSetup(USER, "link");
-    const redirects = [inviteUserByEmail.mock.calls[0][1], generateLink.mock.calls[0][0].options, resetPasswordForEmail.mock.calls[0][1], generateLink.mock.calls[1][0].options];
+    const redirects = [inviteUserByEmail.mock.calls[0][1], ...generateLink.mock.calls.map((c) => c[0].options)];
+    expect(generateLink.mock.calls.map((c) => c[0].type)).toEqual(["invite", "recovery", "recovery"]);
     expect(redirects).toEqual(Array(4).fill({ redirectTo: "https://ops.thekingstribe.org/auth/callback?next=/auth/update-password" }));
   });
 });
@@ -204,7 +221,7 @@ describe("audit outcome", () => {
   it.each([
     [unconfirmed, "email", "Invitation sent, but the audit record could not be written. Please contact an administrator."],
     [unconfirmed, "link", "New invitation link created, but the audit record could not be written. Please contact an administrator."],
-    [openedInvite, "email", "Recovery email sent, but the audit record could not be written. Please contact an administrator."],
+    [openedInvite, "email", "Setup email sent, but the audit record could not be written. Please contact an administrator."],
     [openedInvite, "link", "Recovery link created, but the audit record could not be written. Please contact an administrator."],
   ] as const)("audit failure → link/email stands, truthful warning (%#)", async (setup, how, warning) => {
     setup();
@@ -239,7 +256,7 @@ describe("provider errors return safe messages", () => {
   it.each([
     [unconfirmed, "email", "Unable to create a new invitation."],
     [unconfirmed, "link", "Unable to create a new invitation."],
-    [openedInvite, "email", "Unable to create a recovery link."],
+    [openedInvite, "email", "Unable to send the account setup email. Try again."],
     [openedInvite, "link", "Unable to create a recovery link."],
   ] as const)("raw error replaced (%#)", async (setup, how, message) => {
     setup();
@@ -253,7 +270,7 @@ describe("provider errors return safe messages", () => {
 
   it("rate limiting gets a specific, safe message", async () => {
     openedInvite();
-    resetPasswordForEmail.mockResolvedValueOnce({ data: {}, error: { code: "over_email_send_rate_limit", status: 429, message: "email rate limit exceeded" } });
+    generateLink.mockResolvedValueOnce({ data: { user: null, properties: null }, error: { code: "over_email_send_rate_limit", status: 429, message: "email rate limit exceeded" } });
     expect(await sendAccountSetup(USER, "email")).toEqual({ ok: false, error: "An email was sent to this person very recently. Please wait a minute and try again." });
   });
 
@@ -296,5 +313,65 @@ describe("protected links (no raw Supabase action_link)", () => {
     await sendAccountSetup(USER, "link");
     expect(generateLink).toHaveBeenCalledTimes(1);
     expect(generateLink.mock.calls[0][0].type).toBe("invite");
+  });
+});
+
+describe("admin setup email (Setup incomplete → Send setup email)", () => {
+  beforeEach(openedInvite);
+
+  it("Resend failure after the link was generated is reported truthfully — not as sent, not audited", async () => {
+    sendEmail.mockResolvedValueOnce({ status: "failed", error: "provider said: internal detail" });
+    const r = await sendAccountSetup(USER, "email");
+    expect(r).toEqual({ ok: false, error: "Unable to send the account setup email. Try again." });
+    expect(generateLink).toHaveBeenCalledTimes(1);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith("Account setup email not sent", { status: "failed" });
+    expect(logged()).not.toContain("internal detail");
+  });
+
+  it("Resend rate limit → safe rate-limit message", async () => {
+    sendEmail.mockResolvedValueOnce({ status: "failed", error: "HTTP 429" });
+    expect(await sendAccountSetup(USER, "email")).toEqual({ ok: false, error: "An email was sent to this person very recently. Please wait a minute and try again." });
+  });
+
+  it("email not configured → refused before any token is generated", async () => {
+    isEmailConfigured.mockReturnValue(false);
+    expect(await sendAccountSetup(USER, "email")).toEqual({ ok: false, error: "Email is not configured, so the account setup email could not be sent. Use Create recovery link instead." });
+    expect(generateLink).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("audit failure after a successful send still counts as sent, with the warning", async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: { code: "42501", message: "raw" } });
+    const r = await sendAccountSetup(USER, "email");
+    expect(r).toEqual({ ok: true, data: { link: undefined, channel: "recovery", auditRecorded: false }, message: "Setup email sent, but the audit record could not be written. Please contact an administrator." });
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("the link reaches only the email provider: not the result, logs, audit or any table", async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: { code: "42501", message: "raw" } });
+    const r = await sendAccountSetup(USER, "email");
+    expect(r.ok && r.data.link).toBeUndefined();
+    expect(rpc).toHaveBeenCalledWith("log_account_recovery_issued", { p_user_id: USER, p_delivery: "email" });
+    for (const text of [JSON.stringify(r), JSON.stringify(rpc.mock.calls), logged()]) {
+      expect(text).not.toContain(HASH);
+      expect(text).not.toContain(TOKEN);
+      expect(text).not.toContain("/auth/callback");
+    }
+    expect(writes).toEqual([]);
+    expect(createUser).not.toHaveBeenCalled();
+  });
+
+  it("Create recovery link is unchanged: protected link returned once, no email sent", async () => {
+    const r = await sendAccountSetup(USER, "link");
+    expect(r.ok && r.data.link).toBe(RECOVERY_LINK);
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(resetPasswordForEmail).not.toHaveBeenCalled();
+  });
+
+  it("still a recovery for the same user — never an invitation", async () => {
+    await sendAccountSetup(USER, "email");
+    expect(inviteUserByEmail).not.toHaveBeenCalled();
+    expect(generateLink.mock.calls.map((c) => c[0].type)).toEqual(["recovery"]);
   });
 });

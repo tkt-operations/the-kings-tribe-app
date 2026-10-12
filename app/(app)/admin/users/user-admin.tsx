@@ -18,10 +18,11 @@ import { inviteUser, sendAccountSetup, setUserActive, setUserRole } from "./acti
 interface Role { id: string; key: string; name: string; description: string | null }
 interface UserRow { id: string; email: string; full_name: string; is_active: boolean; roleIds: string[]; lastSignIn: string | null; setupCompleted: boolean; emailConfirmed: boolean }
 
-const COPY: Record<SetupChannel, { email: string; link: string; failed: string; dialogTitle: string; description: (name: string) => string; createdTitle: string; emailSent: string; linkCreated: string }> = {
+const COPY: Record<SetupChannel, { email: string; link: string; emailFailed: string; failed: string; dialogTitle: string; description: (name: string) => string; createdTitle: string; emailSent: string; linkCreated: string }> = {
   invite: {
     email: "Resend invitation",
     link: "Replace invitation link",
+    emailFailed: "Unable to create a new invitation.",
     failed: "Unable to create a new invitation.",
     dialogTitle: "Replace invitation link",
     description: (name) => `Create a new invitation link for ${name}. Any earlier invitation link or email will stop working.`,
@@ -30,13 +31,15 @@ const COPY: Record<SetupChannel, { email: string; link: string; failed: string; 
     linkCreated: "New invitation link created.",
   },
   recovery: {
-    email: "Send recovery email",
+    // Only shown for "Setup incomplete" users: the email says "Complete your account setup", not "Reset your password".
+    email: "Send setup email",
     link: "Create recovery link",
+    emailFailed: "Unable to send the account setup email. Try again.",
     failed: "Unable to create a recovery link.",
     dialogTitle: "Create recovery link",
     description: (name) => `${name} opened their invitation but has not chosen a password yet. Create a one-time link that lets them choose one. Any earlier link will stop working.`,
     createdTitle: "Recovery link created",
-    emailSent: "Recovery email sent.",
+    emailSent: "Setup email sent.",
     linkCreated: "Recovery link created.",
   },
 };
@@ -84,7 +87,7 @@ export function UserAdmin({ users, roles, currentUserId }: { users: UserRow[]; r
                 {channel ? (
                   <div className="mt-2 flex flex-wrap gap-2">
                     <Button size="sm" variant="secondary" className="h-10" disabled={pending}
-                      onClick={() => run(sendSetup(toast, u.id, "email", channel), { toast: false, errorMessage: COPY[channel].failed, onError: (e) => toast.error(e) })}>
+                      onClick={() => run(sendSetup(toast, u.id, "email", channel), { toast: false, errorMessage: COPY[channel].emailFailed, onError: (e) => toast.error(e) })}>
                       {channel === "invite" ? <Mail className="size-4" aria-hidden /> : <KeyRound className="size-4" aria-hidden />} {COPY[channel].email}
                     </Button>
                     <SetupLinkDialog userId={u.id} name={name} channel={channel} disabled={pending} />

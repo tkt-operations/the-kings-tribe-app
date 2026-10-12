@@ -5,6 +5,8 @@ import { z } from "zod";
 import { assertPermission } from "@/lib/auth";
 import { ActionError, friendlyDbError, toActionError, type ActionResult } from "@/lib/action-result";
 import { buildSetupLink, type SetupLinkType } from "@/lib/auth/callback-link";
+import { renderAccountSetupEmail } from "@/lib/email/account-setup";
+import { isEmailConfigured, sendEmail } from "@/lib/email/send";
 import { publicEnv } from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -63,6 +65,8 @@ const ALREADY_ACTIVATED = "This user has already activated their account. Use pa
 const REISSUE_FAILED = "Unable to create a new invitation.";
 const RECOVERY_FAILED = "Unable to create a recovery link.";
 const RATE_LIMITED = "An email was sent to this person very recently. Please wait a minute and try again.";
+const SETUP_EMAIL_FAILED = "Unable to send the account setup email. Try again.";
+const SETUP_EMAIL_UNAVAILABLE = "Email is not configured, so the account setup email could not be sent. Use Create recovery link instead.";
 
 /** Where every invitation and recovery link lands: the callback signs them in, then they choose a password. */
 function invitationRedirect() {
@@ -113,23 +117,37 @@ async function issueInvitation(admin: AdminClient, uid: string, email: string, h
 }
 
 /**
- * Password recovery for an existing user; Supabase never creates a user here.
- * The admin client uses the implicit flow, so the link works on any device
- * (unlike the PKCE Forgot-password flow, which needs the requesting browser).
+ * Recovery for an existing, confirmed user whose setup is incomplete. Supabase
+ * never creates a user here, and a new recovery token replaces the previous one.
+ *
+ * Both deliveries use admin generateLink(recovery) and our protected link
+ * (token hash in the fragment, confirm-first callback). For "email" the app
+ * sends its own "Complete your account setup" email through Resend, rather than
+ * resetPasswordForEmail(), which would send Supabase's "Reset your password"
+ * template — the wrong message for someone who never finished setting up.
+ * The link goes only to the email provider (or, for "link", back to the
+ * manager once); it is never logged or stored.
  */
 async function issueRecovery(admin: AdminClient, uid: string, email: string, how: "email" | "link") {
   const redirectTo = invitationRedirect();
-  if (how === "email") {
-    const { error } = await admin.auth.resetPasswordForEmail(email, { redirectTo });
-    if (error) providerFailure(error, "Recovery email failed", RECOVERY_FAILED);
-    return { link: undefined };
-  }
+  const failed = how === "email" ? SETUP_EMAIL_FAILED : RECOVERY_FAILED;
+  if (how === "email" && !isEmailConfigured()) throw new ActionError(SETUP_EMAIL_UNAVAILABLE);
   const { data, error } = await admin.auth.admin.generateLink({ type: "recovery", email, options: { redirectTo } });
-  if (error) providerFailure(error, "Recovery link failed", RECOVERY_FAILED);
-  if (data.user?.id !== uid) throw new ActionError(RECOVERY_FAILED);
+  if (error) providerFailure(error, "Recovery link failed", failed);
+  if (data.user?.id !== uid) throw new ActionError(failed);
   const link = protectedLink(data, "recovery");
-  if (!link) throw new ActionError(RECOVERY_FAILED);
-  return { link };
+  if (!link) throw new ActionError(failed);
+  if (how === "link") return { link };
+
+  const message = renderAccountSetupEmail(link, publicEnv().appUrl);
+  const sent = await sendEmail({ to: [email], subject: message.subject, html: message.html, text: message.text });
+  if (sent.status !== "sent") {
+    // Never report a link that was not delivered as sent. Status only in logs.
+    console.error("Account setup email not sent", { status: sent.status });
+    if (sent.status === "failed" && /429|rate|too many/i.test(sent.error)) throw new ActionError(RATE_LIMITED);
+    throw new ActionError(sent.status === "skipped" ? SETUP_EMAIL_UNAVAILABLE : SETUP_EMAIL_FAILED);
+  }
+  return { link: undefined };
 }
 
 export type AccountSetupResult = { link?: string; channel: "invite" | "recovery"; auditRecorded: boolean };
@@ -186,7 +204,7 @@ export async function sendAccountSetup(userId: string, delivery: "email" | "link
     revalidatePath("/admin/users");
     const done = channel === "invite"
       ? (how === "email" ? "Invitation sent" : "New invitation link created")
-      : (how === "email" ? "Recovery email sent" : "Recovery link created");
+      : (how === "email" ? "Setup email sent" : "Recovery link created");
     return {
       ok: true,
       data: { link, channel, auditRecorded },

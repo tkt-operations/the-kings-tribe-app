@@ -55,7 +55,8 @@ describe("controls by state", () => {
 
   it("pending but confirmed by Supabase (has a last sign-in): recovery actions, not invitation actions", () => {
     const r = renderAdmin().row("Frankie Lee");
-    expect(within(r).getByRole("button", { name: "Send recovery email" })).toBeTruthy();
+    expect(within(r).getByRole("button", { name: "Send setup email" })).toBeTruthy();
+    expect(within(r).queryByRole("button", { name: /reset|recovery email/i })).toBeNull();
     expect(within(r).getByRole("button", { name: "Create recovery link" })).toBeTruthy();
     expect(within(r).queryByRole("button", { name: /invitation/i })).toBeNull();
     expect(within(r).getByText("Setup incomplete")).toBeTruthy();
@@ -108,11 +109,11 @@ describe("invitation channel", () => {
 });
 
 describe("recovery channel (opened invitation, no password)", () => {
-  it("Send recovery email → success toast", async () => {
-    sendAccountSetup.mockResolvedValue({ ok: true, data: { channel: "recovery", auditRecorded: true }, message: "Recovery email sent." });
+  it("Send setup email → success toast", async () => {
+    sendAccountSetup.mockResolvedValue({ ok: true, data: { channel: "recovery", auditRecorded: true }, message: "Setup email sent." });
     const { row } = renderAdmin();
-    fireEvent.click(within(row("Frankie Lee")).getByRole("button", { name: "Send recovery email" }));
-    await toastIn("polite", "Recovery email sent.");
+    fireEvent.click(within(row("Frankie Lee")).getByRole("button", { name: "Send setup email" }));
+    await toastIn("polite", "Setup email sent.");
     expect(sendAccountSetup).toHaveBeenCalledWith("r", "email");
   });
 
@@ -140,10 +141,10 @@ describe("recovery channel (opened invitation, no password)", () => {
   });
 
   it("audit failure on email → prominent warning toast, not a plain success", async () => {
-    const warning = "Recovery email sent, but the audit record could not be written. Please contact an administrator.";
+    const warning = "Setup email sent, but the audit record could not be written. Please contact an administrator.";
     sendAccountSetup.mockResolvedValue({ ok: true, data: { channel: "recovery", auditRecorded: false }, message: warning });
     const { row } = renderAdmin();
-    fireEvent.click(within(row("Frankie Lee")).getByRole("button", { name: "Send recovery email" }));
+    fireEvent.click(within(row("Frankie Lee")).getByRole("button", { name: "Send setup email" }));
     await toastIn("assertive", warning);
   });
 });
@@ -160,8 +161,8 @@ describe("errors", () => {
     sendAccountSetup.mockRejectedValue(new Error("fetch failed: raw provider detail"));
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { row } = renderAdmin();
-    fireEvent.click(within(row("Frankie Lee")).getByRole("button", { name: "Send recovery email" }));
-    expect((await screen.findAllByText("Unable to create a recovery link.")).length).toBeGreaterThan(0);
+    fireEvent.click(within(row("Frankie Lee")).getByRole("button", { name: "Send setup email" }));
+    expect((await screen.findAllByText("Unable to send the account setup email. Try again.")).length).toBeGreaterThan(0);
     expect(screen.queryByText(/raw provider detail/)).toBeNull();
   });
 });
