@@ -729,7 +729,8 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- Permission
+-- Permission. Phase 1: Administrator and Head of Finance only (the roles that
+-- can already see and review requisitions). No other role's permissions change.
 -- ---------------------------------------------------------------------------
 insert into public.permissions (key, group_name, description) values
   ('requisitions.amend', 'Requisitions', 'Amend submitted requisitions (add, change or remove line items) with a recorded reason')
@@ -737,7 +738,7 @@ on conflict (key) do nothing;
 
 insert into public.role_permissions (role_id, permission_key)
 select r.id, 'requisitions.amend' from public.roles r
-where r.key in ('administrator', 'head_of_finance', 'finance_user')
+where r.key in ('administrator', 'head_of_finance')
 on conflict do nothing;
 
 -- ---------------------------------------------------------------------------

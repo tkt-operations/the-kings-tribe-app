@@ -105,8 +105,7 @@ describe("internal roles and RLS", () => {
     const perms = await as(db, "authenticated", financeUserId, async () =>
       (await one<{ p: string[] }>(db, "select public.my_permissions() as p")).p,
     );
-    // requisitions.amend (20261014000100) only takes effect together with requisitions.view.
-    expect(perms).toEqual(["dashboard.view", "finance.enter", "finance.view", "requisitions.amend"]);
+    expect(perms).toEqual(["dashboard.view", "finance.enter", "finance.view"]);
     const adminPerms = await as(db, "authenticated", adminId, async () =>
       (await one<{ p: string[] }>(db, "select public.my_permissions() as p")).p,
     );
