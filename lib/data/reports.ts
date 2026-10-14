@@ -53,6 +53,8 @@ export async function loadRequisitionItemRows(from: string, to: string): Promise
     )
     .gte("requisitions.submitted_at", `${from}T00:00:00Z`)
     .lt("requisitions.submitted_at", `${addDays(to, 1)}T00:00:00Z`)
+    // Current lines only: lines removed by an amendment stay in the amendment history.
+    .is("removed_at", null)
     .limit(20000);
   type Raw = Omit<RequisitionItemReportRow, "requisition_number" | "submitted_at" | "status" | "department"> & {
     requisitions: { requisition_number: string; submitted_at: string; status: string; departments: { name: string } | null } | null;

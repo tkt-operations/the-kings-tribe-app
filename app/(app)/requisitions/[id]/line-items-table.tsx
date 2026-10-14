@@ -14,7 +14,20 @@ type Line = Pick<RequisitionItem,
   | "id" | "line_number" | "description" | "specifications" | "color" | "size" | "vendor_name" | "vendor_url" | "notes"
   | "review_status" | "review_comment" | "quantity" | "estimated_unit_price" | "estimated_total" | "approved_quantity"
   | "approved_unit_price" | "approved_total" | "po_quantity" | "ordered_quantity" | "purchased_quantity" | "actual_total"
-  | "cancelled_quantity" | "cancel_reason" | "priority" | "essential_justification">;
+  | "cancelled_quantity" | "cancel_reason" | "priority" | "essential_justification">
+  & Partial<Pick<RequisitionItem, "added_in_revision" | "last_changed_revision" | "removed_at" | "removed_reason">>;
+
+/** NEW / CHANGED / REMOVED marker for amended requisitions (nothing for untouched lines). */
+function AmendmentMarker({ item }: { item: Line }) {
+  if (item.removed_at) return <Badge tone="negative">Removed{item.last_changed_revision ? ` · rev ${item.last_changed_revision}` : ""}</Badge>;
+  const added = item.added_in_revision ?? 1;
+  return (
+    <>
+      {added > 1 ? <Badge tone="info">New · rev {added}</Badge> : null}
+      {item.last_changed_revision && item.last_changed_revision !== added ? <Badge tone="attention">Changed · rev {item.last_changed_revision}</Badge> : null}
+    </>
+  );
+}
 
 /**
  * Purchasing lifecycle table (requisition detail). Rendered full width above
@@ -47,18 +60,21 @@ export function LineItemsTable({ items, currency, renderPriorityEditor, renderRe
         </thead>
         <tbody className="divide-y divide-navy/[0.07] align-top">
           {items.map((i) => {
+            const removed = Boolean(i.removed_at);
             const approved = i.review_status === "approved";
             const remaining = approved ? numericToCents(i.approved_quantity) - numericToCents(i.purchased_quantity) - numericToCents(i.cancelled_quantity) : 0n;
             const details = [i.specifications, i.color && `Color: ${i.color}`, i.size && `Size: ${i.size}`, i.vendor_name && `Vendor: ${i.vendor_name}`].filter(Boolean).join(" · ");
             return (
-              <tr key={i.id}>
+              <tr key={i.id} className={removed ? "bg-neutral-gray/50 text-navy/55" : undefined} data-removed={removed || undefined}>
                 <td className="tabular py-3 pl-5 pr-2 text-navy/50 sm:pl-6">{i.line_number}</td>
                 <td className="min-w-[14rem] px-2 py-3" data-testid="item-cell">
                   <div className="mb-1 flex flex-wrap items-center gap-1">
                     <PriorityBadge priority={i.priority} size="sm" />
-                    {renderPriorityEditor?.(i)}
+                    <AmendmentMarker item={i} />
+                    {removed ? null : renderPriorityEditor?.(i)}
                   </div>
-                  <p className="font-medium [overflow-wrap:anywhere]">{i.description}</p>
+                  <p className={`font-medium [overflow-wrap:anywhere] ${removed ? "line-through" : ""}`}>{i.description}</p>
+                  {removed && i.removed_reason ? <p className="mt-1 text-[13px]">Removed: {i.removed_reason}</p> : null}
                   <EssentialReason reason={i.priority === "essential" ? i.essential_justification : null} />
                   {details ? <p className="mt-1 text-[13px] text-navy/60">{details}</p> : null}
                   {i.vendor_url ? (
@@ -75,9 +91,11 @@ export function LineItemsTable({ items, currency, renderPriorityEditor, renderRe
                   <span className="block font-medium">{formatMoney(i.estimated_total, currency)}</span>
                 </td>
                 <td className="whitespace-nowrap px-2 py-3">
-                  <Badge tone={approved ? "positive" : i.review_status === "rejected" ? "negative" : i.review_status === "held" ? "attention" : "neutral"}>
-                    {i.review_status === "pending" ? "Pending" : i.review_status.charAt(0).toUpperCase() + i.review_status.slice(1)}
-                  </Badge>
+                  {removed ? "—" : (
+                    <Badge tone={approved ? "positive" : i.review_status === "rejected" ? "negative" : i.review_status === "held" ? "attention" : "neutral"}>
+                      {i.review_status === "pending" ? "Pending" : i.review_status.charAt(0).toUpperCase() + i.review_status.slice(1)}
+                    </Badge>
+                  )}
                 </td>
                 <td className="tabular whitespace-nowrap px-2 py-3 text-right">
                   {approved ? (

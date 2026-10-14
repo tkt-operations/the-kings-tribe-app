@@ -33,6 +33,37 @@ export interface RequisitionItem {
   cancel_reason: string | null;
   priority: Priority;
   essential_justification: string | null;
+  /** Amendments (20261014000100). Existing lines are revision 1. */
+  added_in_revision: number;
+  last_changed_revision: number | null;
+  removed_at: string | null;
+  removed_reason: string | null;
+  lookup_status?: string;
+}
+
+/** One field-level (or whole-line) change recorded by an amendment. */
+export interface AmendmentChangeRow {
+  id: string;
+  requisition_item_id: string;
+  line_number: number;
+  change_type: "added" | "updated" | "removed";
+  field: string | null;
+  old_value: unknown;
+  new_value: unknown;
+  previous_review: { review_status?: string; review_comment?: string | null } | null;
+}
+
+export interface AmendmentRow {
+  id: string;
+  revision_number: number;
+  actor_id: string | null;
+  actor_label: string | null;
+  reason: string;
+  status_at_amendment: RequisitionStatus;
+  estimated_total_before: string;
+  estimated_total_after: string;
+  submitted_at: string;
+  changes: AmendmentChangeRow[];
 }
 
 export interface RequisitionDetail {
@@ -64,6 +95,8 @@ export interface RequisitionDetail {
   review_comment: string | null;
   closed_at: string | null;
   is_demo: boolean;
+  current_revision: number;
+  amended_at: string | null;
   cost_center_id: string | null;
   expense_category_id: string | null;
   department: { id: string; name: string };
@@ -133,6 +166,8 @@ export interface RequisitionDetail {
   disbursements: { id: string; amount: string; method: string; paid_on: string; reference: string | null; notes: string | null; recorded_by: string | null; created_at: string }[];
   audit: { id: string; occurred_at: string; actor_id: string | null; actor_label: string | null; action: string; metadata: Record<string, unknown> }[];
   notifications: NotificationRow[];
+  /** Newest first. */
+  amendments: AmendmentRow[];
   people: Map<string, string>;
 }
 
@@ -171,6 +206,18 @@ export function normalizeDetailRows(raw: {
   };
 }
 
+/** Amendments newest first; each revision's changes in line order, then field order. Pure — exported for tests. */
+export function normalizeAmendments(raw: unknown): AmendmentRow[] {
+  return rows(raw)
+    .map((a): AmendmentRow => ({
+      ...(withDecimals(a, ["estimated_total_before", "estimated_total_after"]) as unknown as AmendmentRow),
+      changes: rows(a.requisition_item_changes)
+        .map((c) => c as unknown as AmendmentChangeRow & { created_at: string })
+        .sort((x, y) => x.line_number - y.line_number || x.created_at.localeCompare(y.created_at)),
+    }))
+    .sort((x, y) => y.revision_number - x.revision_number);
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function loadRequisitionDetail(id: string): Promise<RequisitionDetail | null> {
@@ -187,7 +234,7 @@ export async function loadRequisitionDetail(id: string): Promise<RequisitionDeta
     .maybeSingle();
   if (!req) return null;
 
-  const [items, history, comments, pos, orders, receipts, disbursements, audit, notifications, people] = await Promise.all([
+  const [items, history, comments, pos, orders, receipts, disbursements, audit, notifications, people, amendments] = await Promise.all([
     supabase.from("requisition_items").select("*").eq("requisition_id", id).order("line_number"),
     supabase.from("requisition_status_history").select("*").eq("requisition_id", id).order("created_at"),
     supabase.from("requisition_comments").select("id, author_id, body, created_at").eq("requisition_id", id).order("created_at"),
@@ -202,6 +249,11 @@ export async function loadRequisitionDetail(id: string): Promise<RequisitionDeta
     supabase.from("audit_logs").select("id, occurred_at, actor_id, actor_label, action, metadata").eq("requisition_id", id).order("occurred_at", { ascending: false }).limit(200),
     supabase.from("notifications").select("id, channel, template, recipient, status, error, created_at, delivery_status, delivery_status_at, notification_events(event_type, occurred_at, detail)").eq("requisition_id", id).order("created_at", { ascending: false }).limit(50),
     supabase.from("profiles").select("id, full_name, email"),
+    supabase
+      .from("requisition_amendments")
+      .select("id, revision_number, actor_id, actor_label, reason, status_at_amendment, estimated_total_before, estimated_total_after, submitted_at, requisition_item_changes(id, requisition_item_id, line_number, change_type, field, old_value, new_value, previous_review, created_at)")
+      .eq("requisition_id", id)
+      .order("revision_number", { ascending: false }),
   ]);
 
   const n = normalizeDetailRows({
@@ -233,6 +285,7 @@ export async function loadRequisitionDetail(id: string): Promise<RequisitionDeta
     disbursements: n.disbursements as unknown as RequisitionDetail["disbursements"],
     audit: (audit.data ?? []) as RequisitionDetail["audit"],
     notifications: (notifications.data ?? []) as RequisitionDetail["notifications"],
+    amendments: normalizeAmendments(amendments.data),
     people: new Map(((people.data ?? []) as { id: string; full_name: string; email: string }[]).map((p) => [p.id, p.full_name || p.email])),
   };
 }

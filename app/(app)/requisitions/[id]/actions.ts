@@ -6,6 +6,7 @@ import { z } from "zod";
 import { assertPermission } from "@/lib/auth";
 import { ActionError, friendlyDbError, toActionError, type ActionResult } from "@/lib/action-result";
 import { buildPurchaseOrderPdf } from "@/lib/data/purchase-order-pdf";
+import { AMENDMENT_REASON_MAX, AMENDMENT_REASON_MIN } from "@/lib/amendments";
 import { isIsoDate } from "@/lib/dates";
 import { parseMoney, parseQuantity } from "@/lib/money";
 import { ESSENTIAL_JUSTIFICATION_MAX, ESSENTIAL_JUSTIFICATION_MIN, PRIORITIES } from "@/lib/priority";
@@ -172,6 +173,46 @@ export async function updateItemPriority(requisitionId: string, itemId: string, 
     if (e instanceof z.ZodError) return { ok: false, error: zodMessage(e) };
     return toActionError(e);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Amendments (Phase 1: staff only; submitted / under review / on hold).
+// The database function re-checks permission, status and every value.
+// ---------------------------------------------------------------------------
+const lineFields = z.object({
+  description: z.string().max(300),
+  quantity: z.string().max(20),
+  estimated_unit_price: z.string().max(20),
+  priority: z.enum(PRIORITIES),
+  essential_justification: z.string().max(ESSENTIAL_JUSTIFICATION_MAX),
+  vendor_name: z.string().max(200),
+  vendor_url: z.string().max(2000),
+  specifications: z.string().max(2000),
+  color: z.string().max(60),
+  size: z.string().max(60),
+  notes: z.string().max(2000),
+});
+const amendmentSchema = z.object({
+  reason: z.string().trim().min(AMENDMENT_REASON_MIN, `Explain the reason for this amendment (at least ${AMENDMENT_REASON_MIN} characters).`).max(AMENDMENT_REASON_MAX),
+  changes: z.array(z.discriminatedUnion("op", [
+    z.object({ op: z.literal("update"), item_id: uuid, fields: lineFields.partial().refine((f) => Object.keys(f).length > 0, "Nothing was changed") }),
+    z.object({ op: z.literal("add"), fields: lineFields }),
+    z.object({ op: z.literal("remove"), item_id: uuid, reason: z.string().trim().max(AMENDMENT_REASON_MAX).optional() }),
+  ])).min(1, "Make at least one change before submitting.").max(60),
+});
+
+export async function amendRequisition(requisitionId: string, input: z.input<typeof amendmentSchema>): Promise<ActionResult<{ revision: number }>> {
+  return guarded(async () => {
+    await assertPermission("requisitions.amend");
+    const parsed = amendmentSchema.parse(input);
+    const r = await rpc<{ revision: number; status: string; lines_added: number; lines_updated: number; lines_removed: number }>("amend_requisition", {
+      p_requisition_id: uuid.parse(requisitionId),
+      p_reason: parsed.reason,
+      p_changes: parsed.changes,
+    });
+    refresh(requisitionId);
+    return { ok: true, data: { revision: r.revision }, message: `Amendment saved as revision ${r.revision}.` };
+  });
 }
 
 // ---------------------------------------------------------------------------

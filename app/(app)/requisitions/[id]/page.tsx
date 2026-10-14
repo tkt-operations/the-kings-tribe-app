@@ -14,7 +14,10 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { PURCHASING_STATUSES, REVIEWABLE_STATUSES, STATUS_LABELS } from "@/lib/workflow/status";
 import { timelineFor, timelineStates } from "@/lib/workflow/request-types";
 import { countByPriority, isPriority, PRIORITY_LABELS } from "@/lib/priority";
+import { canAmend } from "@/lib/amendments";
 import { PriorityEditor } from "./priority-editor";
+import { AmendDialog } from "./amend-dialog";
+import { AmendmentHistory } from "./amendment-history";
 import { toItemModel } from "./item-model";
 import { LineItemsTable } from "./line-items-table";
 import { NotificationLog } from "./notification-log";
@@ -55,10 +58,23 @@ const ACTION_LABELS: Record<string, string> = {
   "requisition_item.remaining_cancelled": "Remaining quantity cancelled",
   "disbursement.recorded": "Disbursement recorded",
   "requisition_item.priority_changed": "Item priority changed",
+  "requisition.amendment_submitted": "Requisition amended",
+  "requisition.line_item_added": "Line item added",
+  "requisition.line_item_updated": "Line item changed",
+  "requisition.line_item_removed": "Line item removed",
 };
 
 /** Extra line for audit entries whose metadata explains the change. */
 function auditDetail(action: string, metadata: Record<string, unknown>): string | null {
+  if (action === "requisition.amendment_submitted") {
+    return `Revision ${metadata.revision ?? "?"}: ${metadata.reason ?? ""}`;
+  }
+  if (action === "requisition.line_item_updated" && Array.isArray(metadata.fields)) {
+    return `Line ${metadata.line_number ?? "?"}: ${(metadata.fields as string[]).join(", ")}`;
+  }
+  if (action === "requisition.line_item_added" || action === "requisition.line_item_removed") {
+    return `Line ${metadata.line_number ?? "?"} (revision ${metadata.revision ?? "?"})`;
+  }
   if (action === "requisition_item.priority_changed") {
     const from = isPriority(metadata.from) ? PRIORITY_LABELS[metadata.from] : String(metadata.from ?? "—");
     const to = isPriority(metadata.to) ? PRIORITY_LABELS[metadata.to] : String(metadata.to ?? "—");
@@ -102,13 +118,16 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
     hasDisbursement: d.disbursements.length > 0,
   });
 
-  const approvedItems = d.items.filter((i) => i.review_status === "approved");
+  // Removed lines stay visible (history) but take no part in review, purchasing or counts.
+  const activeItems = d.items.filter((i) => !i.removed_at);
+  const removedCount = d.items.length - activeItems.length;
+  const approvedItems = activeItems.filter((i) => i.review_status === "approved");
   const activePos = d.purchaseOrders.filter((p) => p.status === "issued");
   const pendingReceipts = d.receipts.filter((r) => r.status === "pending");
   const variance = numericToCents(d.actual_total) - numericToCents(d.approved_total);
 
-  const itemModels = d.items.map(toItemModel);
-  const priorityCounts = countByPriority(d.items);
+  const itemModels = activeItems.map(toItemModel);
+  const priorityCounts = countByPriority(activeItems);
   const itemById = new Map(d.items.map((i) => [i.id, i]));
   const canEditPriority = can("requisitions.review") && d.status !== "closed";
 
@@ -127,10 +146,27 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <StatusBadge status={d.status} />
             {d.is_demo ? <Badge>Demo data</Badge> : null}
+            {d.current_revision > 1 ? <Badge tone="info">Revision {d.current_revision}</Badge> : null}
+            {d.amended_at ? <span className="text-sm text-navy/60">Amended {formatDateTime(d.amended_at, tz)}</span> : null}
             <span className="text-sm text-navy/60">Submitted {formatDateTime(d.submitted_at, tz)} · needed {formatDate(d.needed_by, "long")}</span>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          {canAmend(user.permissions, d.status) ? (
+            <AmendDialog
+              key={`am-${d.current_revision}`}
+              requisitionId={d.id}
+              currency={currency}
+              estimatedTotal={d.estimated_total}
+              lines={activeItems.map((i) => ({
+                id: i.id, line: i.line_number, linkLocked: i.lookup_status === "verified",
+                description: i.description, quantity: q(i.quantity), estimated_unit_price: i.estimated_unit_price,
+                priority: i.priority, essential_justification: i.essential_justification ?? "",
+                vendor_name: i.vendor_name ?? "", vendor_url: i.vendor_url ?? "", specifications: i.specifications ?? "",
+                color: i.color ?? "", size: i.size ?? "", notes: i.notes ?? "",
+              }))}
+            />
+          ) : null}
           {can("requisitions.review") && (d.status === "submitted" || d.status === "on_hold") ? <StartReviewButton requisitionId={d.id} /> : null}
           {can("requisitions.review") && reviewable ? (
             <ReviewDialog
@@ -173,7 +209,8 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
         <CardHeader
           title="Line items"
           description={[
-            `${d.items.length} item${d.items.length === 1 ? "" : "s"} requested`,
+            `${activeItems.length} item${activeItems.length === 1 ? "" : "s"} requested`,
+            ...(removedCount ? [`${removedCount} removed by amendment`] : []),
             ...(["essential", "high"] as const).filter((p) => priorityCounts[p]).map((p) => `${priorityCounts[p]} ${PRIORITY_LABELS[p]}`),
           ].join(" · ")}
         />
@@ -212,6 +249,8 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
               </p>
             </CardBody>
           </Card>
+
+          <AmendmentHistory amendments={d.amendments} currency={currency} timezone={tz} name={name} />
 
           {/* Purchase orders */}
           {d.requestType.issues_purchase_order || d.purchaseOrders.length ? (
