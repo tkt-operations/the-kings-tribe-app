@@ -7,6 +7,7 @@ export const PERMISSIONS = [
   "finance.void",
   "requisitions.view",
   "requisitions.review",
+  "requisitions.amend",
   "purchase_orders.issue",
   "orders.record",
   "receipts.upload",

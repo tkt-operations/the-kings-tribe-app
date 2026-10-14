@@ -65,7 +65,7 @@ async function loadRequisition(id: string): Promise<RequisitionNotice | null> {
       `id, requisition_number, status, requester_name, requester_email, requester_phone, submitted_at, needed_by,
        estimated_total, approved_total, actual_total, review_comment, reply_token,
        departments(name), department_subcategories(name), request_types(name, workflow),
-       requisition_items(line_number, description, quantity, estimated_total, review_status, approved_quantity, approved_total, review_comment, priority, essential_justification),
+       requisition_items(line_number, description, quantity, estimated_total, review_status, approved_quantity, approved_total, review_comment, priority, essential_justification, removed_at),
        notification_preferences(email_opt_in, sms_opt_in, phone, manage_token)`,
     )
     .eq("id", id)
@@ -85,7 +85,8 @@ async function loadRequisition(id: string): Promise<RequisitionNotice | null> {
     subcategory: d.department_subcategories?.name ?? "",
     requestType: d.request_types?.name ?? "",
     workflow: d.request_types?.workflow ?? "",
-    items: [...(d.requisition_items ?? [])].sort((a, b) => a.line_number - b.line_number),
+    // Lines removed by an amendment are not part of the requisition any more.
+    items: [...(d.requisition_items ?? [])].filter((i) => !(i as { removed_at?: string | null }).removed_at).sort((a, b) => a.line_number - b.line_number),
     prefs,
   };
 }
