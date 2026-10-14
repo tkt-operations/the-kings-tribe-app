@@ -15,7 +15,7 @@ let db: Db;
 let adminId: string;
 let headId: string;
 let financeId: string;
-let financeNoViewId: string;
+let amendNoViewId: string;
 let reportingId: string;
 let viewerId: string;
 let ids: Awaited<ReturnType<typeof lookup>>;
@@ -42,38 +42,58 @@ beforeAll(async () => {
   financeId = await createUser(db, "finance@example.org", ["finance_user"], "Finley Finance");
   reportingId = await createUser(db, "reporting@example.org", ["reporting_user"]);
   viewerId = await createUser(db, "viewer@example.org", ["viewer"]);
-  // Seeded Finance User / Viewer / Reporting roles cannot see requisitions; give them
-  // requisitions.view here so the tests isolate requisitions.amend itself.
+  // Finance User stays exactly as seeded. Viewer and Reporting User get
+  // requisitions.view here, so their refusal is about requisitions.amend itself.
   await db.query(
     `insert into public.role_permissions (role_id, permission_key)
-     select id, 'requisitions.view' from public.roles where key in ('finance_user', 'viewer', 'reporting_user') on conflict do nothing`);
-  // A Finance User exactly as seeded (no requisitions.view), via a separate role.
-  await db.query("insert into public.roles (key, name, is_system) values ('finance_seeded', 'Finance (seeded)', false)");
-  await db.query("insert into public.role_permissions (role_id, permission_key) select id, 'requisitions.amend' from public.roles where key = 'finance_seeded'");
-  financeNoViewId = await createUser(db, "finance2@example.org", ["finance_seeded"]);
+     select id, 'requisitions.view' from public.roles where key in ('viewer', 'reporting_user') on conflict do nothing`);
+  // A custom role holding requisitions.amend but not requisitions.view.
+  await db.query("insert into public.roles (key, name, is_system) values ('amend_only', 'Amend only', false)");
+  await db.query("insert into public.role_permissions (role_id, permission_key) select id, 'requisitions.amend' from public.roles where key = 'amend_only'");
+  amendNoViewId = await createUser(db, "amend-only@example.org", ["amend_only"]);
   ids = await lookup(db);
   await createFormToken(db);
 });
 
 describe("permission and grants", () => {
-  it("requisitions.amend exists and is granted to Administrator, Head of Finance and Finance User only", async () => {
+  it("requisitions.amend exists and is granted to Administrator and Head of Finance only", async () => {
     const r = await db.query<{ key: string }>(
       `select ro.key from public.role_permissions rp join public.roles ro on ro.id = rp.role_id
         where rp.permission_key = 'requisitions.amend' and ro.is_system order by ro.key`);
-    expect(r.rows.map((x) => x.key)).toEqual(["administrator", "finance_user", "head_of_finance"]);
+    expect(r.rows.map((x) => x.key)).toEqual(["administrator", "head_of_finance"]);
   });
 
-  it("Administrator, Head of Finance and Finance User may amend", async () => {
-    for (const user of [adminId, headId, financeId]) {
+  it("Finance User keeps exactly its existing permissions (no requisitions.amend, no requisitions.view)", async () => {
+    const r = await db.query<{ permission_key: string }>(
+      `select rp.permission_key from public.role_permissions rp join public.roles ro on ro.id = rp.role_id
+        where ro.key = 'finance_user' order by 1`);
+    expect(r.rows.map((x) => x.permission_key)).toEqual(["dashboard.view", "finance.enter", "finance.view"]);
+  });
+
+  it("the migration adds requisitions.amend to Administrator and Head of Finance and changes no other permission", async () => {
+    const fresh = await createTestDatabase({ before: MIGRATION });
+    const grants = async () => (await fresh.query<{ role: string; permission_key: string }>(
+      `select ro.key as role, rp.permission_key from public.role_permissions rp join public.roles ro on ro.id = rp.role_id order by 1, 2`)).rows
+      .map((x) => `${x.role}:${x.permission_key}`);
+    const before = await grants();
+    await applyMigrationsFrom(fresh, MIGRATION);
+    const after = await grants();
+    expect(after.filter((g) => !before.includes(g))).toEqual(["administrator:requisitions.amend", "head_of_finance:requisitions.amend"]);
+    expect(before.filter((g) => !after.includes(g))).toEqual([]);
+    await fresh.close();
+  });
+
+  it("Administrator and Head of Finance may amend", async () => {
+    for (const user of [adminId, headId]) {
       const id = await newRequisition();
       const out = await amend(user, id, [{ op: "add", fields: { description: "Napkins", quantity: "1", estimated_unit_price: "4", priority: "low" } }]);
       expect(out.revision).toBe(2);
     }
   });
 
-  it("Reporting User and Viewer may not, even with requisitions.view", async () => {
+  it("Finance User, Reporting User and Viewer may not (the last two even with requisitions.view)", async () => {
     const id = await newRequisition();
-    for (const user of [reportingId, viewerId]) {
+    for (const user of [financeId, reportingId, viewerId]) {
       await expectError(amend(user, id, [{ op: "add", fields: { description: "Napkins", quantity: "1", estimated_unit_price: "4", priority: "low" } }]),
         /permission denied: requisitions\.amend/);
     }
@@ -82,7 +102,7 @@ describe("permission and grants", () => {
 
   it("amend also requires requisitions.view (a role that cannot see requisitions cannot amend them)", async () => {
     const id = await newRequisition();
-    await expectError(amend(financeNoViewId, id, [{ op: "add", fields: { description: "Napkins", quantity: "1", estimated_unit_price: "4", priority: "low" } }]),
+    await expectError(amend(amendNoViewId, id, [{ op: "add", fields: { description: "Napkins", quantity: "1", estimated_unit_price: "4", priority: "low" } }]),
       /permission denied: requisitions\.view/);
   });
 
