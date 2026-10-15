@@ -399,3 +399,34 @@ describe("backward compatibility", () => {
     await old.close();
   });
 });
+
+describe("product identity in amendments (20261016000100)", () => {
+  it("records brand / model / SKU changes field by field, on updated and added lines", async () => {
+    const id = await newRequisition();
+    const [l1] = await lines(id);
+    await amend(headId, id, [
+      { op: "update", item_id: l1.id, fields: { requested_brand: "Fender", requested_sku: "J40316000" } },
+      { op: "add", fields: { description: "Guitar strings", quantity: "2", estimated_unit_price: "8.99", priority: "low", requested_sku: "L34572000", vendor_name: "Guitar Center" } },
+    ]);
+    const items = await db.query<{ line_number: number; requested_brand: string | null; requested_sku: string | null; lookup_status: string }>(
+      "select line_number, requested_brand, requested_sku, lookup_status::text from public.requisition_items where requisition_id = $1 order by line_number", [id]);
+    expect(items.rows[0]).toMatchObject({ requested_brand: "Fender", requested_sku: "J40316000", lookup_status: "none" });
+    expect(items.rows[2]).toMatchObject({ line_number: 3, requested_sku: "L34572000", lookup_status: "none" });
+    const changes = await db.query<{ field: string | null; change_type: string; old_value: unknown; new_value: unknown }>(
+      "select field, change_type, old_value, new_value from public.requisition_item_changes where requisition_id = $1 order by change_type, field", [id]);
+    expect(changes.rows.filter((c) => c.change_type === "updated")).toEqual([
+      { field: "requested_brand", change_type: "updated", old_value: null, new_value: "Fender" },
+      { field: "requested_sku", change_type: "updated", old_value: null, new_value: "J40316000" },
+    ]);
+    expect((changes.rows.find((c) => c.change_type === "added")!.new_value as Record<string, unknown>).requested_sku).toBe("L34572000");
+  });
+
+  it("identity still cannot change outside an amendment, and lookup evidence never can", async () => {
+    const id = await newRequisition();
+    await expectError(db.query("update public.requisition_items set requested_sku = 'X1' where requisition_id = $1", [id]), /cannot be changed/);
+    await expectError(db.query("update public.requisition_items set lookup_status = 'expired' where requisition_id = $1", [id]), /cannot be changed/);
+    await expectError(db.query(
+      `insert into public.requisition_items (requisition_id, line_number, description, quantity, estimated_unit_price, estimated_total, requested_sku)
+       values ($1, 9, 'Sneaky', 1, 1, 1, 'X1')`, [id]), /Product details can only be recorded/);
+  });
+});
