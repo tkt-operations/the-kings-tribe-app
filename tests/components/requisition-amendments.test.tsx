@@ -4,7 +4,7 @@
  * required, review summary with before/after values and the revised total,
  * no delete control), line markers and the amendment history.
  */
-import "./setup";
+import { routerMock } from "./setup";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/ui/toast";
@@ -35,7 +35,7 @@ const lines = [
 ];
 
 function openDialog() {
-  render(<ToastProvider><AmendDialog requisitionId={REQ} lines={lines} currency="USD" estimatedTotal="85.00" /></ToastProvider>);
+  render(<ToastProvider><AmendDialog requisitionId={REQ} lines={lines} currency="USD" estimatedTotal="85.00" currentRevision={1} /></ToastProvider>);
   fireEvent.click(screen.getByRole("button", { name: /Amend requisition/ }));
   return screen.getByRole("dialog");
 }
@@ -278,5 +278,89 @@ describe("product link auto-fill in amendments (shared with the request form)", 
     const d = openDialog();
     expect(within(fieldset(d, /Line 2/)).queryByRole("button", { name: "Get details" })).toBeNull();
     expect(within(fieldset(d, /Line 1/)).getByRole("button", { name: "Get details" })).toBeTruthy();
+  });
+});
+
+
+describe("submitting (no duplicate revisions; never invites a resubmit)", () => {
+  const readyToSubmit = () => {
+    const d = openDialog();
+    fireEvent.change(within(fieldset(d, /Line 1/)).getByLabelText(/Quantity/), { target: { value: "5" } });
+    fireEvent.change(within(d).getByLabelText(/Reason for this amendment/), { target: { value: "Requester called with corrections." } });
+    fireEvent.click(within(d).getByRole("button", { name: "Review changes" }));
+    return d;
+  };
+
+  it("Submit is disabled while saving, and a double click sends exactly one amendment", async () => {
+    let resolve!: (v: ActionResult<{ revision: number }>) => void;
+    amendRequisition.mockImplementation(() => new Promise((r) => { resolve = r; }));
+    const d = readyToSubmit();
+    const submit = within(d).getByRole("button", { name: "Submit amendment" });
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+    await waitFor(() => expect((within(d).getByRole("button", { name: /Saving/ }) as HTMLButtonElement).disabled).toBe(true));
+    expect((within(d).getByRole("button", { name: "Back to edit" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(amendRequisition).toHaveBeenCalledTimes(1);
+    resolve({ ok: true, data: { revision: 2 }, message: "Amendment saved as revision 2." });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(amendRequisition).toHaveBeenCalledTimes(1);
+  });
+
+  it("after a save the page refreshes; until it shows the new revision: 'saved' + Refresh, and no way to amend again", async () => {
+    const d = readyToSubmit();
+    fireEvent.click(within(d).getByRole("button", { name: "Submit amendment" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(routerMock.refresh).toHaveBeenCalled();
+    // The page is still on revision 1 (refresh not landed / failed): say it was saved, offer a page refresh.
+    const status = await screen.findByText(/Revision 2 saved\. Refresh the page to see it\./);
+    expect(within(status.closest("p")!).getByRole("button", { name: /Refresh page/ })).toBeTruthy();
+    expect((screen.getByRole("button", { name: /Amend requisition/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText(/try again|submit again|resubmit/i)).toBeNull();
+  });
+
+  it("once the page shows the saved revision the notice goes away (the page remounts the dialog per revision)", async () => {
+    const view = render(<ToastProvider><AmendDialog key="am-1" requisitionId={REQ} lines={lines} currency="USD" estimatedTotal="85.00" currentRevision={1} /></ToastProvider>);
+    fireEvent.click(screen.getByRole("button", { name: /Amend requisition/ }));
+    const d = screen.getByRole("dialog");
+    fireEvent.change(within(fieldset(d, /Line 1/)).getByLabelText(/Quantity/), { target: { value: "5" } });
+    fireEvent.change(within(d).getByLabelText(/Reason for this amendment/), { target: { value: "Requester called with corrections." } });
+    fireEvent.click(within(d).getByRole("button", { name: "Review changes" }));
+    fireEvent.click(within(d).getByRole("button", { name: "Submit amendment" }));
+    await screen.findByText(/Revision 2 saved/);
+    view.rerender(<ToastProvider><AmendDialog key="am-2" requisitionId={REQ} lines={lines} currency="USD" estimatedTotal="99.95" currentRevision={2} /></ToastProvider>);
+    expect(screen.queryByText(/Revision 2 saved/)).toBeNull();
+    expect((screen.getByRole("button", { name: /Amend requisition/ }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("a failed save says so and keeps the review open (nothing was saved)", async () => {
+    amendRequisition.mockResolvedValue({ ok: false, error: "Only submitted, under-review or on-hold requisitions can be amended" });
+    const d = readyToSubmit();
+    fireEvent.click(within(d).getByRole("button", { name: "Submit amendment" }));
+    expect((await within(d).findAllByText(/Only submitted, under-review or on-hold/)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/saved\. Refresh/)).toBeNull();
+  });
+});
+
+describe("Description cell keeps its notes together", () => {
+  it("the previous-product warning renders inside the Description cell, not as a separate grid cell", async () => {
+    const GC = "https://www.guitarcenter.com/Fender/Player-II-Stratocaster-1500000390193.gc";
+    getAmendmentProductDetails.mockResolvedValue({ ok: true, data: {
+      outcome: "hints", domain: "guitarcenter.com", method: "url_hint", priceNote: null, token: null, currency: null, price: null,
+      fields: { title: "Player II Stratocaster", sku: "1500000390193", brand: "Fender" } } });
+    const d = openDialog();
+    fireEvent.click(within(d).getByRole("button", { name: "Add line item" }));
+    const g = fieldset(d, /New line/);
+    fireEvent.change(within(g).getByLabelText(/Product link/), { target: { value: GC } });
+    fireEvent.click(within(g).getByRole("button", { name: "Get details" }));
+    await waitFor(() => expect((within(g).getByLabelText(/Description/) as HTMLInputElement).value).toBe("Player II Stratocaster"));
+    fireEvent.change(within(g).getByLabelText(/Description/), { target: { value: "Strat for the youth band" } });
+    fireEvent.change(within(g).getByLabelText(/Product link/), { target: { value: "https://www.example.com/other" } });
+    fireEvent.blur(within(g).getByLabelText(/Product link/));
+    const warning = await within(g).findByText(/From the previous product/);
+    const cell = within(g).getByTestId(/_description_cell$/);
+    expect(cell.contains(warning)).toBe(true);
+    expect(cell.contains(within(g).getByLabelText(/Description/))).toBe(true);
+    expect(cell.contains(within(g).getByLabelText(/Quantity/))).toBe(false);
   });
 });

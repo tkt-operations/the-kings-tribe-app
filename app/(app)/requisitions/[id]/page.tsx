@@ -14,7 +14,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { PURCHASING_STATUSES, REVIEWABLE_STATUSES, STATUS_LABELS } from "@/lib/workflow/status";
 import { timelineFor, timelineStates } from "@/lib/workflow/request-types";
 import { countByPriority, isPriority, PRIORITY_LABELS } from "@/lib/priority";
-import { canAmend } from "@/lib/amendments";
+import { canAmend, lineStateKey } from "@/lib/amendments";
 import { PriorityEditor } from "./priority-editor";
 import { AmendDialog } from "./amend-dialog";
 import { AmendmentHistory } from "./amendment-history";
@@ -156,6 +156,7 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
             <AmendDialog
               key={`am-${d.current_revision}`}
               requisitionId={d.id}
+              currentRevision={d.current_revision}
               currency={currency}
               estimatedTotal={d.estimated_total}
               lines={activeItems.map((i) => ({
@@ -171,7 +172,7 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
           {can("requisitions.review") && (d.status === "submitted" || d.status === "on_hold") ? <StartReviewButton requisitionId={d.id} /> : null}
           {can("requisitions.review") && reviewable ? (
             <ReviewDialog
-              key={`rv-${d.status}`}
+              key={lineStateKey("rv", d.status, d.current_revision)}
               requisitionId={d.id}
               items={itemModels}
               currency={currency}
