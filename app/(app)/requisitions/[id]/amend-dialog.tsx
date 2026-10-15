@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { FilePenLine, Plus, Undo2, X } from "lucide-react";
+import { CheckCircle2, FilePenLine, Plus, RefreshCw, Undo2, X } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -87,10 +87,12 @@ function LineFields({ id, value, onChange, errors, currency, lookup, linkLocked 
         onGetDetails={lookup.onGetDetails}
         onUndo={lookup.onUndo}
       />
-      <Field label={label("Description", "description")} required className="sm:col-span-6" {...f("description")}>
-        <Input maxLength={300} value={value.description} onChange={set("description")} />
-      </Field>
-      {note("description")}
+      <div className="sm:col-span-6" data-testid={`${id}_description_cell`}>
+        <Field label={label("Description", "description")} required {...f("description")}>
+          <Input maxLength={300} value={value.description} onChange={set("description")} />
+        </Field>
+        {note("description")}
+      </div>
       <Field label="Quantity" required className="sm:col-span-2" {...f("quantity")}>
         <Input inputMode="decimal" value={value.quantity} onChange={set("quantity")} />
       </Field>
@@ -165,12 +167,14 @@ const FILLABLE = new Set<FillField>(["description", "requested_brand", "requeste
  * anything is saved. Product links use the same best-effort auto-fill as the
  * request form.
  */
-export function AmendDialog({ requisitionId, lines, currency, estimatedTotal }: {
+export function AmendDialog({ requisitionId, lines, currency, estimatedTotal, currentRevision }: {
   requisitionId: string;
   lines: AmendableLine[];
   currency: string;
   /** Current estimated total (decimal string). */
   estimatedTotal: string;
+  /** The revision this page is showing. */
+  currentRevision: number;
 }) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<"edit" | "review">("edit");
@@ -180,6 +184,9 @@ export function AmendDialog({ requisitionId, lines, currency, estimatedTotal }: 
   const [reason, setReason] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [changes, setChanges] = useState<AmendmentChange[]>([]);
+  // Revision saved by this dialog. While the page still shows an older revision,
+  // say it was saved (never invite a second submission) and offer a page refresh.
+  const [savedRevision, setSavedRevision] = useState<number | null>(null);
   const { pending, error, run } = useAction();
   const money = (cents: bigint) => formatCents(cents, currency);
   const moneyText = (v: string) => { const c = parseMoney(v); return c === null ? v : money(c); };
@@ -261,15 +268,26 @@ export function AmendDialog({ requisitionId, lines, currency, estimatedTotal }: 
   function submit() {
     run(() => amendRequisition(requisitionId, { reason: reason.trim(), changes }), {
       errorMessage: "Unable to save the amendment. Please try again.",
-      onSuccess: () => setOpen(false),
+      onSuccess: (data) => { setSavedRevision(data.revision); setOpen(false); },
     });
   }
 
   const lineById = new Map(lines.map((l) => [l.id, l]));
 
+  const awaitingPage = savedRevision !== null && currentRevision < savedRevision;
+
   return (
     <>
-      <Button variant="secondary" onClick={start}>
+      {awaitingPage ? (
+        <p role="status" className="flex flex-wrap items-center gap-2 rounded-xl bg-kingdom-green/10 px-3 py-2 text-sm font-medium text-navy">
+          <CheckCircle2 className="size-4 text-kingdom-green" aria-hidden />
+          Revision {savedRevision} saved. Refresh the page to see it.
+          <Button size="sm" variant="ghost" className="h-9" onClick={() => window.location.reload()}>
+            <RefreshCw className="size-4" aria-hidden /> Refresh page
+          </Button>
+        </p>
+      ) : null}
+      <Button variant="secondary" onClick={start} disabled={awaitingPage || pending}>
         <FilePenLine className="size-4" aria-hidden /> Amend requisition
       </Button>
       <Dialog open={open} onClose={() => setOpen(false)} wide title={step === "edit" ? "Amend requisition" : "Review amendment"}

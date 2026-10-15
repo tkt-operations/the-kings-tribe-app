@@ -116,3 +116,12 @@ export const EMPTY_LINE: LineDraft = {
 export function canAmend(permissions: { has(p: "requisitions.amend"): boolean }, status: RequisitionStatus): boolean {
   return permissions.has("requisitions.amend") && isAmendable(status);
 }
+
+/**
+ * React key for dialogs that copy the line items into their own state when
+ * they mount (the review dialog). It changes with every amendment, so a saved
+ * amendment always gives them fresh state built from the current lines.
+ */
+export function lineStateKey(prefix: string, status: RequisitionStatus, revision: number): string {
+  return `${prefix}-${status}-r${revision}`;
+}
