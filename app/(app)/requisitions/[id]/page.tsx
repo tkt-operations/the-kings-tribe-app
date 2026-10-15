@@ -163,6 +163,7 @@ export default async function RequisitionDetailPage({ params }: PageProps<"/requ
                 description: i.description, quantity: q(i.quantity), estimated_unit_price: i.estimated_unit_price,
                 priority: i.priority, essential_justification: i.essential_justification ?? "",
                 vendor_name: i.vendor_name ?? "", vendor_url: i.vendor_url ?? "", specifications: i.specifications ?? "",
+                requested_brand: i.requested_brand ?? "", requested_model: i.requested_model ?? "", requested_sku: i.requested_sku ?? "",
                 color: i.color ?? "", size: i.size ?? "", notes: i.notes ?? "",
               }))}
             />

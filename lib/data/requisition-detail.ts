@@ -39,6 +39,9 @@ export interface RequisitionItem {
   removed_at: string | null;
   removed_reason: string | null;
   lookup_status?: string;
+  requested_brand?: string | null;
+  requested_model?: string | null;
+  requested_sku?: string | null;
 }
 
 /** One field-level (or whole-line) change recorded by an amendment. */
