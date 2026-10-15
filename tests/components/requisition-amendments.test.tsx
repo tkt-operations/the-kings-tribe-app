@@ -10,10 +10,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/ui/toast";
 import type { ActionResult } from "@/lib/action-result";
 import type { AmendmentRow, RequisitionItem } from "@/lib/data/requisition-detail";
+import type { ProductLookupResponse } from "@/lib/product/types";
 
 const amendRequisition = vi.fn<(id: string, input: unknown) => Promise<ActionResult<{ revision: number }>>>();
 vi.mock("@/app/(app)/requisitions/[id]/actions", () => ({
   amendRequisition: (id: string, input: unknown) => amendRequisition(id, input),
+}));
+const getAmendmentProductDetails = vi.fn<(id: string, url: string) => Promise<ActionResult<ProductLookupResponse>>>();
+vi.mock("@/app/(app)/requisitions/[id]/product-actions", () => ({
+  getAmendmentProductDetails: (id: string, url: string) => getAmendmentProductDetails(id, url),
 }));
 
 const { AmendDialog } = await import("@/app/(app)/requisitions/[id]/amend-dialog");
@@ -23,7 +28,7 @@ const { LineItemsTable } = await import("@/app/(app)/requisitions/[id]/line-item
 const REQ = "00000000-0000-4000-8000-0000000000aa";
 const L1 = "00000000-0000-4000-8000-000000000001";
 const L2 = "00000000-0000-4000-8000-000000000002";
-const blank = { essential_justification: "", vendor_name: "", vendor_url: "", specifications: "", color: "", size: "", notes: "" };
+const blank = { essential_justification: "", vendor_name: "", vendor_url: "", requested_brand: "", requested_model: "", requested_sku: "", specifications: "", color: "", size: "", notes: "" };
 const lines = [
   { ...blank, id: L1, line: 1, linkLocked: false, description: "Coffee beans", quantity: "3", estimated_unit_price: "19.99", priority: "medium" as const },
   { ...blank, id: L2, line: 2, linkLocked: true, description: "Paper cups", quantity: "2.5", estimated_unit_price: "10.01", priority: "low" as const, vendor_url: "https://shop.example.com/cups" },
@@ -38,6 +43,7 @@ const fieldset = (dialog: HTMLElement, legend: RegExp) =>
   within(dialog).getAllByRole("group").find((g) => legend.test(g.querySelector("legend")?.textContent ?? ""))!;
 
 beforeEach(() => {
+  getAmendmentProductDetails.mockReset();
   amendRequisition.mockReset();
   amendRequisition.mockResolvedValue({ ok: true, data: { revision: 2 }, message: "Amendment saved as revision 2." });
 });
@@ -172,5 +178,105 @@ describe("amendment history", () => {
   it("renders nothing for a requisition that was never amended", () => {
     const { container } = render(<AmendmentHistory amendments={[]} currency="USD" timezone="UTC" name={() => null} />);
     expect(container.textContent).toBe("");
+  });
+});
+
+
+describe("product link auto-fill in amendments (shared with the request form)", () => {
+  const GC = "https://www.guitarcenter.com/Fender/Player-II-Stratocaster-1500000390193.gc";
+  const found: ProductLookupResponse = {
+    outcome: "full", domain: "guitarcenter.com", method: "structured_data", priceNote: null, token: "ignored-token", currency: "USD", price: "849.99",
+    fields: { title: "Fender Player II Stratocaster", vendor_name: "Guitar Center", sku: "1500000390193", brand: "Fender" },
+  };
+  const newLine = (d: HTMLElement) => { fireEvent.click(within(d).getByRole("button", { name: "Add line item" })); return fieldset(d, /New line/); };
+  const lookup = async (g: HTMLElement, url = GC) => {
+    fireEvent.change(within(g).getByLabelText(/Product link/), { target: { value: url } });
+    fireEvent.click(within(g).getByRole("button", { name: "Get details" }));
+  };
+
+  it("Add new line: Get details fills description, vendor, price, SKU and brand; values stay editable", async () => {
+    getAmendmentProductDetails.mockResolvedValue({ ok: true, data: found });
+    const d = openDialog();
+    const g = newLine(d);
+    await lookup(g);
+    await waitFor(() => expect((within(g).getByLabelText(/Description/) as HTMLInputElement).value).toBe("Fender Player II Stratocaster"));
+    expect(getAmendmentProductDetails).toHaveBeenCalledWith(REQ, GC);
+    expect((within(g).getByLabelText(/^Vendor/) as HTMLInputElement).value).toBe("Guitar Center");
+    expect((within(g).getByLabelText(/Unit price/) as HTMLInputElement).value).toBe("849.99");
+    expect((within(g).getByLabelText(/SKU/) as HTMLInputElement).value).toBe("1500000390193");
+    expect((within(g).getByLabelText(/Brand/) as HTMLInputElement).value).toBe("Fender");
+    expect(within(g).getAllByText("Filled").length).toBeGreaterThan(0);
+    fireEvent.change(within(g).getByLabelText(/Unit price/), { target: { value: "799.99" } });
+    expect((within(g).getByLabelText(/Unit price/) as HTMLInputElement).value).toBe("799.99");
+    expect(within(g).getByText("Edited")).toBeTruthy();
+  });
+
+  it("never overwrites what was typed: a 'Use fetched value' suggestion appears instead", async () => {
+    getAmendmentProductDetails.mockResolvedValue({ ok: true, data: found });
+    const d = openDialog();
+    const g = newLine(d);
+    fireEvent.change(within(g).getByLabelText(/Description/), { target: { value: "Strat for the youth band" } });
+    await lookup(g);
+    await waitFor(() => expect((within(g).getByLabelText(/SKU/) as HTMLInputElement).value).toBe("1500000390193"));
+    expect((within(g).getByLabelText(/Description/) as HTMLInputElement).value).toBe("Strat for the youth band");
+    expect(within(g).getByRole("button", { name: /Use fetched value: Fender Player II Stratocaster/ })).toBeTruthy();
+  });
+
+  it("changing the link clears only untouched auto-filled values; edited ones are kept", async () => {
+    getAmendmentProductDetails.mockResolvedValue({ ok: true, data: found });
+    const d = openDialog();
+    const g = newLine(d);
+    await lookup(g);
+    await waitFor(() => expect((within(g).getByLabelText(/SKU/) as HTMLInputElement).value).toBe("1500000390193"));
+    fireEvent.change(within(g).getByLabelText(/Unit price/), { target: { value: "799.99" } }); // edited: kept
+    fireEvent.change(within(g).getByLabelText(/Product link/), { target: { value: "https://www.example.com/other-product" } });
+    fireEvent.blur(within(g).getByLabelText(/Product link/));
+    await waitFor(() => expect((within(g).getByLabelText(/Description/) as HTMLInputElement).value).toBe(""));
+    expect((within(g).getByLabelText(/SKU/) as HTMLInputElement).value).toBe("");
+    expect((within(g).getByLabelText(/^Vendor/) as HTMLInputElement).value).toBe("");
+    expect((within(g).getByLabelText(/Unit price/) as HTMLInputElement).value).toBe("799.99");
+    expect(within(g).getByText(/details filled from the previous product were cleared/)).toBeTruthy();
+  });
+
+  it("a failed lookup falls back to manual entry and never blocks the amendment", async () => {
+    getAmendmentProductDetails.mockResolvedValue({ ok: false, error: "Too many lookups right now. Please complete the details below." });
+    const d = openDialog();
+    const g = newLine(d);
+    await lookup(g, "https://www.example.com/blocked");
+    expect(await within(g).findByText(/Too many lookups right now/)).toBeTruthy();
+    fireEvent.change(within(g).getByLabelText(/Description/), { target: { value: "Spare cable" } });
+    fireEvent.change(within(g).getByLabelText(/Unit price/), { target: { value: "12" } });
+    fireEvent.change(within(d).getByLabelText(/Reason for this amendment/), { target: { value: "Requester added a spare cable." } });
+    fireEvent.click(within(d).getByRole("button", { name: "Review changes" }));
+    fireEvent.click(within(d).getByRole("button", { name: "Submit amendment" }));
+    await waitFor(() => expect(amendRequisition).toHaveBeenCalledTimes(1));
+    expect((amendRequisition.mock.calls[0][1] as { changes: { op: string; fields: Record<string, string> }[] }).changes[0])
+      .toMatchObject({ op: "add", fields: { description: "Spare cable", estimated_unit_price: "12", vendor_url: "https://www.example.com/blocked" } });
+  });
+
+  it("Edit existing line: the same lookup fills empty fields, and the changes show in the amendment diff", async () => {
+    getAmendmentProductDetails.mockResolvedValue({ ok: true, data: found });
+    const d = openDialog();
+    const g = fieldset(d, /Line 1/);
+    await lookup(g);
+    await waitFor(() => expect((within(g).getByLabelText(/SKU/) as HTMLInputElement).value).toBe("1500000390193"));
+    expect((within(g).getByLabelText(/Description/) as HTMLInputElement).value).toBe("Coffee beans"); // already set: kept
+    fireEvent.change(within(d).getByLabelText(/Reason for this amendment/), { target: { value: "Requester sent the exact product link." } });
+    fireEvent.click(within(d).getByRole("button", { name: "Review changes" }));
+    const summary = within(d).getByRole("list", { name: "Changes in this amendment" });
+    expect(within(summary).getByText(/SKU \/ product number:/)).toBeTruthy();
+    expect(within(summary).getByText("1500000390193")).toBeTruthy();
+    fireEvent.click(within(d).getByRole("button", { name: "Submit amendment" }));
+    await waitFor(() => expect(amendRequisition).toHaveBeenCalledTimes(1));
+    expect((amendRequisition.mock.calls[0][1] as { changes: unknown[] }).changes[0]).toEqual({
+      op: "update", item_id: L1,
+      fields: { vendor_name: "Guitar Center", vendor_url: GC, requested_brand: "Fender", requested_sku: "1500000390193" },
+    });
+  });
+
+  it("a verified product link stays locked: no Get details on that line", () => {
+    const d = openDialog();
+    expect(within(fieldset(d, /Line 2/)).queryByRole("button", { name: "Get details" })).toBeNull();
+    expect(within(fieldset(d, /Line 1/)).getByRole("button", { name: "Get details" })).toBeTruthy();
   });
 });

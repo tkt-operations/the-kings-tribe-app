@@ -19,7 +19,7 @@ export const AMENDMENT_REASON_MAX = 1000;
 /** The line fields an amendment may change, in display order. */
 export const AMENDABLE_FIELDS = [
   "description", "quantity", "estimated_unit_price", "priority", "essential_justification",
-  "vendor_name", "vendor_url", "specifications", "color", "size", "notes",
+  "vendor_name", "vendor_url", "requested_brand", "requested_model", "requested_sku", "specifications", "color", "size", "notes",
 ] as const;
 export type AmendableField = (typeof AMENDABLE_FIELDS)[number];
 
@@ -31,6 +31,9 @@ export const FIELD_LABELS: Record<AmendableField, string> = {
   essential_justification: "Why essential",
   vendor_name: "Vendor",
   vendor_url: "Product link",
+  requested_brand: "Brand",
+  requested_model: "Model",
+  requested_sku: "SKU / product number",
   specifications: "Specifications",
   color: "Color",
   size: "Size",
@@ -105,7 +108,8 @@ export function displayValue(field: string, value: unknown, formatMoney: (v: str
 
 export const EMPTY_LINE: LineDraft = {
   description: "", quantity: "1", estimated_unit_price: "", priority: "medium", essential_justification: "",
-  vendor_name: "", vendor_url: "", specifications: "", color: "", size: "", notes: "",
+  vendor_name: "", vendor_url: "", requested_brand: "", requested_model: "", requested_sku: "",
+  specifications: "", color: "", size: "", notes: "",
 };
 
 /** Whether to offer "Amend requisition": the permission and an amendable status (Phase 1). */
